@@ -1,0 +1,23 @@
+# A function followed by one or more
+# lines beginning with a ! means that
+# this function might be wrapped
+# in a macro with a different signature
+# than the function itself. 
+# We need to keep track of this for
+# parsing the argument types. 
+#
+# In the specification of this alternative function
+# prototype we only care to know which argument is
+# the name of the allocated variable. So for 
+# the alternative prototypes it is safe to put
+# "-1" in the "number" and "size" positions. 
+#
+# func                number   size   addr
+#
+__wt_calloc              1       2     3 
+!__wt_calloc_def         1      -1     2
+!__wt_block_size_alloc  -1      -1     1 
+!__bit_alloc            -1      -1     2
+#malloc                 -1       0    -1
+__wt_realloc            -1       2     3
+!__wt_realloc_def       -1      -1     3
