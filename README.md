@@ -43,7 +43,7 @@ Set the PIN_ROOT environmental variable to point to the root  directory of the t
 
 If you want memtracker to be able to find the source location of memory accesses and allocations, compile your code with debug symbols. If you want memtracker to be able to find the names of dynamically allocated variables, run your program (under the pintool) on the same system where you compiled your program and don't remove or move the source files.
 
-** Read about configuring the tool (below) before running it!**
+**Read about configuring the tool (below) before running it!**
 
 To run:
 
@@ -67,7 +67,9 @@ You need to describe to memtracker the prototypes of the memory allocation funct
 
 By default, memtracker looks for allocation function prototypes in the file alloc.in in the current working directory. Alternatively, you can provide your own file name with the -a option to the pintool as follows:
 
+```
 pin.sh -t $CUSTOM_PINTOOLS_HOME/obj-intel64/memtracker.so -a my_alloc_prototypes.in -- <your program with arguments>
+```
 
 Memtracker expects to find the prototypes of the allocation functions in the following format (one function per line):
 
@@ -77,13 +79,10 @@ Memtracker expects to find the prototypes of the allocation functions in the fol
 
 where:
 
-<func_name> -- a function name
-<arg_id_of_number> -- argument id of the number of allocated items or -1
-		   if your alloc function does not use such an argument 
-<arg_id_of_size> -- argument id of the size of the allocation
-<arg_id_of_addr> -- argument id of the pointer to the location where the allocated
-		 address will be stored or -1 if the address is returned by the
-		 function. 
+| func_name> | a function name |
+| arg_id_of_number | argument id of the number of allocated items or -1 if your alloc function does not use such an argument |
+| arg_id_of_size | argument id of the size of the allocation |
+| arg_id_of_addr | argument id of the pointer to the location where the allocated address will be stored or -1 if the address is returned by the function. |
 
 arg_id is the index of the corresponding argument passed into the allocation function. We assume that the very first argument has id 0.
 
@@ -123,7 +122,9 @@ Tracking every memory access in the entire program is very expensive. It will pr
 
 To do so, you use the -f option to the pintool and provide the file name that has the names of the functions of interest. For example, suppose you put your problematic functions in the file funcs.in. Then you would invoke the tool as follows: 
 
+```
 pin.sh -t $CUSTOM_PINTOOLS_HOME/obj-intel64/memtracker.so -f funcs.in -- <your program with arguments>
+```
 
 By default, memtracker looks for the scope-limiting functions in the file memtracker.in (located in the working directory) even if you don't use the -f option. 
 
@@ -155,7 +156,7 @@ In this example we see five different record types:
 
 Let's go into detail of what these records show.
 
-1. **Allocation record**: This record type is prefixed with "alloc:" and has the following fields:
+**Allocation record**: This record type is prefixed with "alloc:" and has the following fields:
 
 * thread id
 * allocated address
@@ -164,12 +165,12 @@ Let's go into detail of what these records show.
 * source file and line from which the allocation was made
 * the name of the variable for which we allocated space.
 
-2. **Function delimiter record**: Prefixed with "function-begin:" or "function-end:". The fields are:
+**Function delimiter record**: Prefixed with "function-begin:" or "function-end:". The fields are:
 
 * thread id
 * function name
 
-3. **Memory access record without call-site information**: Prefixed with "read:" or "write:". The fields are:
+**Memory access record without call-site information**: Prefixed with "read:" or "write:". The fields are:
 
 * thread id
 * memory address 
@@ -179,13 +180,9 @@ Let's go into detail of what these records show.
 
 An example of such a record is the first one in the above trace excerpt.
 
-4. Memory access record with call-site information, but without data-source information
+**Memory access record with call-site information, but without data-source information**: This record has the same format as the type 3 above, but the last field contains the source file/line of the access instead of <unknown>. The fifth record in the above excerpt is an example of such a record. 
 
-This record has the same format as the type 3 above, but the last field contains the source file/line of the access instead of <unknown>. The fifth record in the above excerpt is an example of such a record. 
-
-5. Memory access record with call-site information and with data-source information
-
-This record is the same as the type 4 above, but we have two additional fields at the end:
+**Memory access record with call-site information and with data-source information:** This record is the same as the type 4 above, but we have two additional fields at the end:
 
 * the source code location of the dynamic memory allocation corresponding to this access
 * the name of the variable to which this access is made. 
