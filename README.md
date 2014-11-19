@@ -79,7 +79,9 @@ Memtracker expects to find the prototypes of the allocation functions in the fol
 
 where:
 
-| func_name> | a function name |
+| Token name | Description |
+|------------|-------------|
+| func_name> | the function name |
 | arg_id_of_number | argument id of the number of allocated items or -1 if your alloc function does not use such an argument |
 | arg_id_of_size | argument id of the size of the allocation |
 | arg_id_of_addr | argument id of the pointer to the location where the allocated address will be stored or -1 if the address is returned by the function. |
