@@ -51,10 +51,8 @@ bool LOUD = false;
 bool go = false;
 bool selectiveInstrumentation = false;
 
-/*
-char fBeginStr[] = "function-begin:";
-char fEndStr[] = "function-end:";
-*/
+unsigned long STACK_BASE = 0x0000700000000000;
+
 typedef enum{
     FUNC_BEGIN,
     FUNC_END
@@ -84,6 +82,9 @@ KNOB<string> KnobAllocFuncsFile(KNOB_MODE_WRITEONCE, "pintool",
 
 KNOB<int> KnobAppPtrSize(KNOB_MODE_WRITEONCE, "pintool",
 				"p", "64", "application pointer size in bits (default is 64)");
+
+KNOB<bool> KnobTrackStackAccesses(KNOB_MODE_WRITEONCE, "pintool",
+				"s", "false", "Include stack memory accesses into the trace. Default is false. ");
 
 
 /* ===================================================================== */
@@ -942,37 +943,38 @@ VOID callAfterAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr)
 VOID callBeforeAfterFunction(VOID *rtnAddr, func_event_t eventType)
 {
 
+    /* Don't track until we hit main() */
+    if(!go)
+	return;
+
     PIN_GetLock(&lock, PIN_ThreadId() + 1);
 
     {
 	string name = RTN_FindNameByAddress((ADDRINT)rtnAddr);
 	THREADID tid = PIN_ThreadId();
-	bool tracked = false; 
+	bool funcNeedsTracking = false;
 
-	/* Find out if this function is in the list of
-	 * the functions that the user wants tracked
+        /*
+	 * If we are entering a new function, 
+	 * find out if we need to begin tracking. 
+	 * If we are exiting a function, find out if we need to turn
+	 * tracking off. 
 	 */
 	for (string trackedFname: TrackedFuncsList)
 	{
 	    if(trackedFname.compare(name) == 0)
-		tracked = true;
+		funcNeedsTracking = true;
 	}
 	
-	/* Set the flag for the current thread telling it
-	 * whether or not we want to track memory accesses within
-	 * this function and whether or not we want to print enter/exit
-	 * events.
-	 */
-	if(tracked)
-	{
-	    cout << (char*)funcEventNames[eventType] << " " << PIN_ThreadId() << " " 
-		 << name << endl;
-	    if(eventType == FUNC_BEGIN)
-		inTracked[tid] = YES;
-	    else
-		inTracked[tid] = NO;
-	}
+	if(funcNeedsTracking && eventType == FUNC_BEGIN) 
+	    inTracked[tid] = YES;
 
+	if(inTracked[tid] == YES)
+	    cout << (char*)funcEventNames[eventType] << " " << PIN_ThreadId() << " " 
+		 << name << endl;	 
+
+	if(funcNeedsTracking && eventType == FUNC_END)
+	    inTracked[tid] = NO;
     }
 
     cout.flush();
@@ -988,6 +990,10 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
 	return;
 
     if(inTracked[PIN_ThreadId()] == NO)
+	return;
+
+    if(!KnobTrackStackAccesses &&
+       addr > STACK_BASE)
 	return;
     
     PIN_GetLock(&lock, PIN_ThreadId()+1);
@@ -1301,9 +1307,13 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
      * if a thread exits. */
     largestUnusedThreadID = threadid+1;
 
-    /* Grow the inTracked vector according to the number of threads.*/
-    if(threadid == inTracked.size())
+    /* If we are tracking everything set the inTracked flag to YES, 
+       otherwise to NO.
+    */
+    if(selectiveInstrumentation)
 	inTracked.push_back(NO);
+    else
+	inTracked.push_back(YES);
 
     for(FuncRecord *fr: funcRecords)
     {
@@ -1341,7 +1351,6 @@ int main(int argc, char *argv[])
 
     /* If the user wants to trace only the specific function (and whatever is
      * called from them), they would provide a list of functions of interest. 
-     * TODO: Implement support for this. 
      */
     selectiveInstrumentation = 
 	parseFunctionList(KnobTrackedFuncsFile.Value().c_str(), TrackedFuncsList);
@@ -1357,12 +1366,6 @@ int main(int argc, char *argv[])
     IMG_AddInstrumentFunction(Image, 0);
     PIN_AddThreadStartFunction(ThreadStart, 0);
     PIN_AddFiniFunction(Fini, 0);
-
-    /* Once we run we are going to have at least one thread
-     * so add a boolean flag to the vector of per-thread flags 
-     * indicating whether we are inside a tracked function
-     */
-    inTracked.push_back(NO);
 
     // Never returns
     PIN_StartProgram();
