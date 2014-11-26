@@ -29,6 +29,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 END_LEGAL */
 
+#include <sys/types.h>
 #include <assert.h>
 #include <fstream>
 #include <iomanip>
@@ -36,9 +37,12 @@ END_LEGAL */
 #include <string.h>
 #include <string>
 #include <sys/time.h>
+#include <stdio.h>
 #include <sstream> 
 #include <map>
 #include <utility>
+#include <unistd.h>
+#include <sys/syscall.h>
 #include "pin.H"
 
 /* ===================================================================== */
@@ -51,7 +55,62 @@ bool LOUD = false;
 bool go = false;
 bool selectiveInstrumentation = false;
 
-unsigned long STACK_BASE = 0x0000700000000000;
+void get_process_stack(pid_t pid);
+void get_and_refresh_thread_stacks(pid_t pid, pid_t tid);
+
+class Stack
+{
+public:
+    size_t start;
+    size_t end;
+    pid_t tid;
+    
+    Stack(size_t start, size_t end, pid_t tid)
+	{
+	    this->start = start;
+	    this->end = end;
+	    this->tid = tid;
+	}
+
+    Stack()
+	{
+	    this->start = 0;
+	    this->end = 0;
+	    this->tid = 0;
+	}
+
+    bool contains(size_t addr)
+	{
+	    if(this->start <= addr &&
+	       this->end >= addr)
+		return true;
+	    else
+		return false;
+	}
+
+    bool operator==(const Stack& rhs) 
+	{ 
+	    return (this->start == rhs.start && this->end == rhs.end 
+		&& this->tid == rhs.tid);
+	}
+
+    bool operator!=(const Stack& rhs) 
+	{ 
+	    return !(this->start == rhs.start && this->end == rhs.end 
+		&& this->tid == rhs.tid);
+	}
+
+};
+
+ostream& operator<<(std::ostream &strm, const Stack &s) 
+{
+    return strm << (hex) << s.start <<"-" << s.end << (dec) << " [" << s.tid << "]";
+}
+
+Stack processStack(0, 0, 0);
+
+Stack **threadStacks = NULL;
+size_t threadStacksSize = 0;
 
 typedef enum{
     FUNC_BEGIN,
@@ -64,6 +123,8 @@ char readStr[] = "read:";
 char writeStr[] = "write:";
 
 #define BITS_PER_BYTE 8
+#define KILOBYTE 1024
+
 
 /* ===================================================================== */
 /* Commandline Switches */
@@ -818,6 +879,9 @@ VOID callBeforeMain()
 {
     if(LOUD)
 	cout << "MAIN CALLED ++++++++++++++++++++++++++++++++++++++++++" << endl;
+
+    get_process_stack(getpid());
+
     go = true;
 }
 
@@ -992,9 +1056,18 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
     if(inTracked[PIN_ThreadId()] == NO)
 	return;
 
-    if(!KnobTrackStackAccesses &&
-       addr > STACK_BASE)
-	return;
+    if(!KnobTrackStackAccesses)
+    {
+	if(processStack.contains((size_t)addr))
+	    return;
+	
+	if(!threadStacks[PIN_ThreadId()])
+	{
+	    cerr << "Warning: null stack for thread " << PIN_ThreadId() << endl;
+	}
+	else if(threadStacks[PIN_ThreadId()]->contains((size_t)addr))
+	    return;
+    }
     
     PIN_GetLock(&lock, PIN_ThreadId()+1);
     {
@@ -1295,13 +1368,26 @@ bool parseFunctionList(const char *fname, vector<string> &list)
  * to index the array of per-thread data records by thread id. So we
  * if we see a gap in thread IDs we will create an extra record in the
  * array to fill that gap, even though that record will never be used.  
+ *
+ * I don't know if this call-back can be executed concurrently by 
+ * multiple threads. If yes, then we should be acquiring a lock here.
+ * However, when I acquire and release a lock (even just around the 
+ * two printouts in the beginning), I get a deadlock. My guess is that
+ * there is something within Pin that doesn't like when we acquire
+ * locks within a ThreadStart routine. 
  */
 
 VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
 
-    cerr << "Thread " << threadid << " is starting " << endl;
-    cout << "Thread " << threadid << " is starting " << endl;
+    cerr << "Thread " << threadid << " [" << syscall(SYS_gettid)<< "] is starting " << endl;
+    cout << "Thread " << threadid << " [" << syscall(SYS_gettid)<< "] is starting " << endl;
+
+    /* We need to refresh our info on stack ranges every time
+     * a new thread starts. We pass the tid, which is Linux-specific.
+     * If need arises, this needs to be changed to be more platform-independent.
+     */
+    get_and_refresh_thread_stacks(getpid(), syscall(SYS_gettid));
 
     /* Thread IDs are monotonically increasing and are not reused
      * if a thread exits. */
@@ -1325,7 +1411,18 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
 	    fr->thrAllocData->push_back(tr);
 	}
     }
+
 }
+
+VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v)
+{
+
+    cerr << "Thread " << threadid << " [" << syscall(SYS_gettid)<< "] is exiting " << endl;
+    cout << "Thread " << threadid << " [" << syscall(SYS_gettid)<< "] is exiting " << endl;
+
+    threadStacks[threadid] = 0;
+}
+
 
 VOID Fini(INT32 code, VOID *v)
 {
@@ -1365,6 +1462,7 @@ int main(int argc, char *argv[])
 
     IMG_AddInstrumentFunction(Image, 0);
     PIN_AddThreadStartFunction(ThreadStart, 0);
+    PIN_AddThreadFiniFunction(ThreadFini, 0);
     PIN_AddFiniFunction(Fini, 0);
 
     // Never returns
@@ -1373,6 +1471,215 @@ int main(int argc, char *argv[])
     return 0;
     
 }
+
+/* ===================================================================== *
+ * Various helper routines that do not directly instrument or analyze code
+ * ===================================================================== */
+void growThreadStacks(int newSize)
+{
+    threadStacks = (Stack**)realloc(threadStacks, newSize*sizeof(Stack*));
+    assert(threadStacks);
+    threadStacksSize = newSize;
+}
+
+void printThreadStacks()
+{
+    size_t i;
+    for(i = 0; i< threadStacksSize; i++)
+    {
+	if(threadStacks[i])
+	    cerr << *threadStacks[i] << endl;
+	else
+	    cerr << "NULL stack at index " << i << endl;
+    }
+}
+
+
+Stack* get_thread_stack(pid_t pid, pid_t tid)
+{
+    FILE *cmd_output;
+    char *line = NULL;
+    ssize_t bytes_read = 0;
+    size_t len = 0;
+    Stack *s = NULL;
+
+    stringstream maps_stream;
+    maps_stream << "cat /proc/"<< pid << "/task/" << tid << "/maps";
+    string maps_command = maps_stream.str();
+ 
+    /* This will execute the cat command and pipe
+     * the output to a file handle cmd_output.
+     */
+    cmd_output = popen(maps_command.c_str(), "r");
+    if(cmd_output == NULL)
+    {
+	cerr << "Could not read output from command: "<< maps_command << endl;
+	return NULL;
+    }
+    
+    /* Let's read the output line by line until we find the record
+     * corresponding to the stack region. */
+    while(bytes_read != -1)
+    {
+	bytes_read = getline(&line, &len, cmd_output);
+	if(bytes_read > 0)
+	{
+	    string lineStr(line);
+	    size_t pos;
+
+	    if((pos = lineStr.find("[stack]")) != string::npos)
+	    {
+		char *end_ptr = 0;
+
+		/* Let's parse the stack boundaries. 
+		 * The first value on the line should be the stack start, 
+		 * then, a '-', and then the stack end.
+		 */
+		size_t stack_start = strtol(line, &end_ptr, 16);
+		if(!end_ptr || end_ptr[0] != '-')
+		{
+		    cerr << "Unexpected line format when parsing thread stacks " << endl;
+		    cerr << "Offending line is: " << endl;
+		    cerr << line << endl;
+		    free(line);
+		    pclose(cmd_output);
+		    return NULL;
+		}
+		end_ptr++;
+
+		size_t stack_end = strtol(end_ptr, NULL, 16);
+
+		s = new Stack(stack_start, stack_end, tid);
+	    }
+	}
+	if(len > 0)
+	{
+	    free(line);
+	    line = NULL;
+	}
+    }
+
+    pclose(cmd_output);
+    return s;
+
+}
+
+/* This function finds the stack for the
+ * newly created thread (tid) and refreshes
+ * the stacks for existing threads in case they 
+ * have been reallocates. 
+ */
+void
+get_and_refresh_thread_stacks(pid_t pid, pid_t tid)
+{
+    /* Let's go over existing thread stacks to see
+     * if they were reallocates */
+    size_t i;
+    for(i = 0; i < threadStacksSize; i++)
+    {
+	if(!threadStacks[i])
+	    continue;
+
+	Stack *oldStack = threadStacks[i];
+	Stack *newStack = get_thread_stack(pid, oldStack->tid);
+
+	if(!newStack)
+	    continue;
+	
+	if(*oldStack != *newStack)
+	{
+	    cerr << "Stack for thread " << i << " has changed" << endl;
+	    cerr << "Old stack: " << *oldStack << endl;
+	    cerr << "New stack: " << *newStack << endl;
+	    *threadStacks[i] = *newStack;
+	}
+	delete newStack;
+    }
+    
+    /* Let's get the stack for the newly allocated thread */
+    if(tid)
+    {
+	pid_t pin_tid = PIN_ThreadId();
+	Stack *stack = get_thread_stack(pid, tid);
+
+	if(threadStacksSize < (size_t)(pin_tid + 1))
+	    growThreadStacks(pin_tid+1);
+	threadStacks[pin_tid] = stack;
+	if(stack)
+	    cerr << "Stack " << *stack << " associated with thread " << 
+		pin_tid << endl; 
+	else
+	    cerr << "Null stack for thread " << tid << "-" << pin_tid << endl;
+    }
+}
+
+
+void
+get_process_stack(pid_t pid)
+{
+    FILE *cmd_output;
+    char *line = NULL;
+    ssize_t bytes_read = 0;
+    size_t len = 0;
+
+    stringstream pmap_stream;
+    pmap_stream << "pmap -d " << pid;
+    string pmap_command = pmap_stream.str();
+
+    /* This will execute the pmap command and pipe
+     * the output to a file handle cmd_output.
+     */
+    cmd_output = popen(pmap_command.c_str(), "r");
+    if(cmd_output == NULL)
+    {
+	cerr << "Could not read output from command: "<< pmap_command << endl;
+	return;
+    }
+
+    /* Let's read the output line by line until we find the
+     * process stack region. Once we do, parse the base and
+     * length.
+     */
+    bool foundStack = false;
+    while(bytes_read != -1 && !foundStack)
+    {
+	bytes_read = getline(&line, &len, cmd_output);
+	if(bytes_read > 0)
+	{
+	    string lineStr(line);
+	    if(lineStr.find("[ stack ]") != string::npos)
+	    {
+		char *end_ptr = 0;
+
+		/* The first value should be the stack base, 
+		 * the second is stack size in KB.
+		 */
+		size_t process_stack_base = strtol(line, &end_ptr, 16);
+		size_t process_stack_size = strtol(end_ptr, NULL, 10);
+
+		cerr << "Process stack base is: 0x" << hex 
+		     << process_stack_base << dec << endl; 
+		cerr << "Process stack size is: " << process_stack_size << "K" << endl;
+		
+		processStack.start = process_stack_base;
+		processStack.end = process_stack_base + process_stack_size * KILOBYTE;
+		processStack.tid = pid;
+		foundStack = true;
+	    }
+	}
+	if(len > 0)
+	{
+	    free(line);
+	    line = NULL;
+	}
+    }
+
+    pclose(cmd_output);
+    return;
+
+}
+
+
 
 /* ===================================================================== */
 /* eof */
