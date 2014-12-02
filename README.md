@@ -55,7 +55,7 @@ To run:
 pin.sh -t $CUSTOM_PINTOOLS_HOME/obj-intel64/memtracker.so -- <your program with arguments>
 ```
 
-For an example of the actual working script that launches this tool with a WiredTiger library running the LevelDB benchmark, take a look at scripts/memtracker.sh.
+For an example of the actual working script that launches this tool with a WiredTiger library running the LevelDB benchmark, take a look at scripts/memtracker.sh. For an example of a script that launches the pintool and converts the raw trace to JSON in parallel, take a look at scripts/memtracker+m2j.sh.
 
 ##### Command-line options:
 
