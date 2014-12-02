@@ -183,7 +183,10 @@ def parseMemoryAccess(line, out):
         if(i == 7):
             varName = words[i];
         if(i == 8):
-            varType = words[i];    
+            varType = words[i]; 
+        if(i > 8):
+            varType = varType + " " + words[i]; 
+
 
 
     r = AccessRecord(accessType, threadID, addr, size, funcName, sourceLoc,

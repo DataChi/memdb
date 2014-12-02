@@ -1,0 +1,19 @@
+CXX = g++
+CXXFLAGS = -Wall -O3 -std=c++0x -fPIC
+CXXLIBS = -lelf -ldwarf
+
+SRCS = varinfo.cpp scoping.cpp
+OBJS = $(SRCS:.cpp=.o)
+
+all: libdebug_info.a
+
+libdebug_info.a: $(OBJS)
+	ar rcs $@ $(OBJS)
+	ranlib $@
+
+.cpp.o:
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+clean:
+	rm -rf *.o libdebug_info.a
+

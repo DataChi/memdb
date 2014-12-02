@@ -11,9 +11,12 @@
 # Tools targets
 #
 ##############################################################
-TEST_TOOL_ROOTS := memtracker 
+TEST_TOOL_ROOTS := memtracker memoryleaker null procinstr showprocs-dynamic showprocs-static straggler-catcher
 
-TOOL_LIBS += -lrt
+TOOL_LIBS += -L. -ldebug_info -lrt 
 TOOL_CXXFLAGS += -std=c++0x -g -Wno-error=format-contains-nul -Wno-format-contains-nul -Wno-write-strings
 TOOL_CXXFLAGS_NOOPT=1
 DEBUG = 1
+
+
+

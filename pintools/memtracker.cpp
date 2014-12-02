@@ -45,6 +45,8 @@ END_LEGAL */
 #include <sys/syscall.h>
 #include "pin.H"
 
+#include "varinfo.hpp"
+
 /* ===================================================================== */
 /* Global Variables */
  /* ===================================================================== */
@@ -54,6 +56,8 @@ PIN_LOCK lock;
 bool LOUD = false;
 bool go = false;
 bool selectiveInstrumentation = false;
+
+// Definitions having to do with process and thread stacks.
 
 void get_process_stack(pid_t pid);
 void get_and_refresh_thread_stacks(pid_t pid, pid_t tid);
@@ -112,6 +116,16 @@ Stack processStack(0, 0, 0);
 Stack **threadStacks = NULL;
 size_t threadStacksSize = 0;
 
+// End stack-related definitions
+
+/* In this map we keep the paths to Image build locations
+ * for images we care about. Build locations are needed to
+ * parse the types and names of fields within large structures, 
+ * because binaries contain paths to source files relative to
+ * the build location. 
+ *
+map<string, string> ImagePathsMap;
+*/
 typedef enum{
     FUNC_BEGIN,
     FUNC_END
@@ -121,6 +135,11 @@ char *funcEventNames[2] = {"function-begin:", "function-end:"};
 
 char readStr[] = "read:";
 char writeStr[] = "write:";
+
+typedef enum{
+    TRACKED,
+    ALLOC
+} file_mode_t;
 
 #define BITS_PER_BYTE 8
 #define KILOBYTE 1024
@@ -145,7 +164,10 @@ KNOB<int> KnobAppPtrSize(KNOB_MODE_WRITEONCE, "pintool",
 				"p", "64", "application pointer size in bits (default is 64)");
 
 KNOB<bool> KnobTrackStackAccesses(KNOB_MODE_WRITEONCE, "pintool",
-				"s", "false", "Include stack memory accesses into the trace. Default is false. ");
+				  "s", "false", "Include stack memory accesses into the "
+				  "trace. Default is false. ");
+
+
 
 
 /* ===================================================================== */
@@ -190,9 +212,12 @@ public:
     string  sourceFile;
     int sourceLine;
     string  varName;
+    string varType;
+    VarInfo *vi;
 
-    AllocRecord(string file, int line, string varname):
-	sourceFile(file), sourceLine(line), varName(varname) {};
+    AllocRecord(string file, int line, string varname, string vartype, VarInfo *v):
+	sourceFile(file), sourceLine(line), varName(varname), 
+	varType(vartype), vi(v) {};
 };
 
 map<MemoryRange, AllocRecord> allocmap;
@@ -242,6 +267,7 @@ typedef struct func_record
     int breakID;
     int retaddr;
     bool noSourceInfo;
+    VarInfo *vi;
     vector<FuncProto*> *otherFuncProto;
     vector<ThreadAllocData*> *thrAllocData; 
 } FuncRecord;
@@ -287,7 +313,7 @@ FuncRecord* findFuncRecord(vector<FuncRecord*> *frlist, string name)
 }
 
 FuncRecord* allocateAndAdd(vector<FuncRecord*> *frlist, 
-			   FuncProto* fp)
+			   FuncProto* fp, VarInfo *vi)
 {
     assert(lock._owner != 0);
 
@@ -297,6 +323,7 @@ FuncRecord* allocateAndAdd(vector<FuncRecord*> *frlist,
     frlist->push_back(fr);
     
     fr->name = fp->name; 
+    fr->vi = vi;
     fr->retaddr = fp->retaddr;
     fr->otherFuncProto = fp->otherFuncProto;
     fr->thrAllocData = new vector<ThreadAllocData*>();
@@ -941,7 +968,7 @@ VOID callAfterAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr)
     {
 	INT32 column = 0, line = 0;
 	string filename; 
-	string varname;
+	string varname, vartype;
 
 	/* Let's get the source file and line */
 	PIN_LockClient();
@@ -951,10 +978,15 @@ VOID callAfterAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr)
 	PIN_UnlockClient();
 
 	if(filename.length() > 0 && line > 0)
+	{
 	    varname = 
 		findAllocVarName(filename, line, fr->name, fr->retaddr,
 				 *(fr->otherFuncProto));
 
+	    /* Let's find the variable type */
+	    if(varname.length() > 0 && fr->vi)
+		vartype = fr->vi->type(filename, line, varname);
+	}
 
 	/* Let's remember this allocation record */
 	{
@@ -962,7 +994,7 @@ VOID callAfterAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr)
 	  size_t size = (*fr->thrAllocData)[tid]->size * 
 	    (*fr->thrAllocData)[tid]->number;
 	  MemoryRange *mr = new MemoryRange(base, size);
-	  AllocRecord *ar = new AllocRecord(filename, line, varname);
+	  AllocRecord *ar = new AllocRecord(filename, line, varname, vartype, fr->vi);
 
 	  map<MemoryRange, AllocRecord>::iterator it =
 	    allocmap.find(*mr);
@@ -990,7 +1022,8 @@ VOID callAfterAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr)
 	     << (*fr->thrAllocData)[tid]->number 
 	     << " " << filename 
 	     << ":" << line
-	     << " " << varname
+	     << " " << varname 
+	     << " " << vartype
 	     << endl; 
 	cout.flush();
     }
@@ -1060,13 +1093,14 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
     {
 	if(processStack.contains((size_t)addr))
 	    return;
-	
+
 	if(!threadStacks[PIN_ThreadId()])
 	{
 	    cerr << "Warning: null stack for thread " << PIN_ThreadId() << endl;
 	}
 	else if(threadStacks[PIN_ThreadId()]->contains((size_t)addr))
 	    return;
+
     }
     
     PIN_GetLock(&lock, PIN_ThreadId()+1);
@@ -1092,10 +1126,26 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
 
 	if(it != allocmap.end())
 	{
+	    /* We found the allocation record corresponding to that memory access.
+	     * If it is a part of a larger structure, let's find out the field name 
+	     */
+	    string field = "";
+	    size_t offset = addr - it->first.base;
+	    if(offset >= 0)
+		field = it->second.vi->fieldname(it->second.sourceFile, 
+						 it->second.sourceLine, 
+						 it->second.varName, offset);
+
 	    cout << (char*)accessType << " " << PIN_ThreadId() << " 0x" << hex << setw(16) 
 		 << setfill('0') << addr << dec << " " << size << " " 
 		 << name << " " << source << " " << it->second.sourceFile
-		 << ":" << it->second.sourceLine << " " << it->second.varName << endl;
+		 << ":" << it->second.sourceLine << " " << it->second.varName 
+		 << " " << it->second.varType;
+
+	    if(field.length() > 0)
+		cout << "->" << field;
+
+	    cout << endl;
 	}
 	else
 	{
@@ -1183,6 +1233,7 @@ VOID Instruction(INS ins, VOID *v)
 
 VOID Image(IMG img, VOID *v)
 {
+    cerr << "Loading image " << IMG_Name(img) << endl;
 
     /* Find main. We won't do anything before main starts. */
     RTN rtn = RTN_FindByName(img, "main");
@@ -1196,6 +1247,8 @@ VOID Image(IMG img, VOID *v)
     /* Go over all the allocation routines we are instrumenting and insert the
      * instrumentation.
      */
+    bool varInfoAllocated = false;
+    VarInfo *vi = NULL;
     for(FuncProto *fp: funcProto)
     {
 
@@ -1203,13 +1256,31 @@ VOID Image(IMG img, VOID *v)
 
 	if (RTN_Valid(rtn))
 	{
+	    /* If we found a routine we care about, allocate the
+	     * VarInfo structure for that image. Init it if we can.
+	     * If not, make it NULL.
+	     */
+	    if(!varInfoAllocated)
+	    {
+		varInfoAllocated = true;
+
+		vi = new VarInfo();
+
+		if (!vi->init(IMG_Name(img)))
+		{
+		    cerr<<"Failed to initialize VarInfo for image " << IMG_Name(img) << endl;
+		    delete vi;
+		    vi = NULL;
+		}
+	    }
+
 	    FuncRecord *fr;
 	    cout << "Procedure " << fp->name << " located." << endl;
 
 	    PIN_GetLock(&lock, PIN_ThreadId() + 1);
 	    if((fr = findFuncRecord(&funcRecords, fp->name)) == NULL)
 	    {
-		fr = allocateAndAdd(&funcRecords, fp);
+		fr = allocateAndAdd(&funcRecords, fp, vi);
 	    }
 
 
@@ -1273,13 +1344,14 @@ VOID Image(IMG img, VOID *v)
     }   
 }
 
+
 /* ===================================================================== */
 /* Parse the list of functions we want to instrument.                    */
 /* Return false if we can't open the file or it is empty.                */
 /* Return true otherwise.                                                */
 /* ===================================================================== */
 
-bool parseFunctionList(const char *fname, vector<string> &list)
+bool parseFunctionList(const char *fname, vector<string> &list, file_mode_t mode)
 {
     bool selective = true;
     ifstream f;
@@ -1289,7 +1361,7 @@ bool parseFunctionList(const char *fname, vector<string> &list)
     if(f.fail())
     {
 	cerr << "Failed to open required file " << fname << endl;
-	exit(-1);
+	return false;
     }
 
     cout << "Routines specified for instrumentation:" << endl;
@@ -1314,8 +1386,19 @@ bool parseFunctionList(const char *fname, vector<string> &list)
 	 */
 	if(name.compare("*") == 0)
 	{
-	    selective = false;
-	    continue;
+	    if(mode == TRACKED)
+	    {
+		selective = false;
+		continue;
+	    }
+	    else if(mode == ALLOC)
+	    {
+		cerr << "Found a line with '*' and nothing else on it. "
+		    "This makes no sense in the allocation function "
+		    "config file. Please read the documentation on the "
+		    "correct format." << endl;
+		exit(-1);
+	    }
 	}
 	
 	list.push_back(name);
@@ -1325,18 +1408,19 @@ bool parseFunctionList(const char *fname, vector<string> &list)
     
     if(list.size() == 0)
     {
-	if(selective)
+	if(mode == TRACKED && selective)
 	{
 	    cerr << "No function names in file " << fname << 
 		" and no line with '*'. " 
 		"Please specify what you want to track. " << endl;
 	    exit(-1);
 	}
-	return false;
+	else
+	    return false;
     }
     else
     {
-	if(!selective)
+	if(mode == TRACKED && !selective)
 	{
 	    cerr << "There appear to be names of function to track "
 		"in file " << fname << " as well as a line with '*'. "
@@ -1344,7 +1428,8 @@ bool parseFunctionList(const char *fname, vector<string> &list)
 		"selected functions. " << endl;
 	    exit(-1);
 	}
-	return true;
+	else
+	    return true;
     }
 }
 
@@ -1450,8 +1535,10 @@ int main(int argc, char *argv[])
      * called from them), they would provide a list of functions of interest. 
      */
     selectiveInstrumentation = 
-	parseFunctionList(KnobTrackedFuncsFile.Value().c_str(), TrackedFuncsList);
-    parseFunctionList(KnobAllocFuncsFile.Value().c_str(), AllocFuncsList);
+	parseFunctionList(KnobTrackedFuncsFile.Value().c_str(), TrackedFuncsList, TRACKED);
+
+    /* Parse the allocation function prototypes */
+    parseFunctionList(KnobAllocFuncsFile.Value().c_str(), AllocFuncsList, ALLOC);
     parseAllocFuncsProto(AllocFuncsList);
 
     /* Instrument all functions to output when they begin and end */
