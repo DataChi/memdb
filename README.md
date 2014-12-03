@@ -9,6 +9,14 @@ At the moment, the tools allow you to detect sharing (true and false) in multith
 * memtracker2json -- a script that converts the Pin trace to JSON format
 * memvis -- a tool that analyzes the JSON trace and produces HTML and JavaScript to visualize it.
 
+You can run them sequentially or as a pipeline. If you run them sequentially, what needs to happen is this:
+
+ 1. memtracker will spit log records to stdout. Redirect this output to a file, say log.txt. (See scripts/memtracker.sh for an example.) 
+ 2. Run memtracker2json.py -- supply log.txt as the input. Memtracker2json will output the JSON trace to the stdout. Save this trace to a file. (See the documentation below for an example). 
+ 3. Run memvis, providing the JSON trace generated above as an input. See the memvis documentation (below) to visualize the output in the browser. 
+
+An alternative to running the tools sequentially is to pipe the output of each tool into the input of the next tool. This removes the need to save the traces. For an example, take a look at scripts/memtracker+m2j.sh.
+
 
 ## memtracker.so 
 
@@ -45,7 +53,7 @@ The second prerequisite is to have libelf and libdwarf libraries installed. Thos
 
 ##### Pre-requisites:
 
-If you want memtracker to be able to find the source location of memory accesses and allocations, compile your code with debug symbols. If you want memtracker to be able to find the names of dynamically allocated variables, run your program (under the pintool) on the same system where you compiled your program and don't remove or move the source files.
+If you want memtracker to be able to know where in your code true or false sharing occurs as well as the names and types of the shared variables, compile your code with debug symbols. Run your program (under the pintool) on the same system where you compiled your program and don't remove or move the source files. (If you are running on a different system, make sure that the source files are in the same absolute path as they were on the system where the program or the library was compiled).
 
 **Read about configuring the tool (below) before running it!**
 
@@ -55,7 +63,7 @@ To run:
 pin.sh -t $CUSTOM_PINTOOLS_HOME/obj-intel64/memtracker.so -- <your program with arguments>
 ```
 
-For an example of the actual working script that launches this tool with a WiredTiger library running the LevelDB benchmark, take a look at scripts/memtracker.sh. For an example of a script that launches the pintool and converts the raw trace to JSON in parallel, take a look at scripts/memtracker+m2j.sh.
+For an example of the actual working script that launches this tool with a WiredTiger library running the LevelDB benchmark, take a look at scripts/memtracker.sh. 
 
 ##### Command-line options:
 
