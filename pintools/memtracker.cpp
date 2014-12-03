@@ -214,10 +214,14 @@ public:
     string  varName;
     string varType;
     VarInfo *vi;
+    size_t item_size;
+    size_t item_number;
 
-    AllocRecord(string file, int line, string varname, string vartype, VarInfo *v):
+    AllocRecord(string file, int line, 
+		string varname, string vartype, VarInfo *v,
+		size_t size, size_t number):
 	sourceFile(file), sourceLine(line), varName(varname), 
-	varType(vartype), vi(v) {};
+	varType(vartype), vi(v), item_size(size), item_number(number) {};
 };
 
 map<MemoryRange, AllocRecord> allocmap;
@@ -993,8 +997,11 @@ VOID callAfterAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr)
 	  ADDRINT base = (*fr->thrAllocData)[tid]->addr;
 	  size_t size = (*fr->thrAllocData)[tid]->size * 
 	    (*fr->thrAllocData)[tid]->number;
+	  size_t item_size = (*fr->thrAllocData)[tid]->size;
+	  size_t item_number = 	(*fr->thrAllocData)[tid]->number;
 	  MemoryRange *mr = new MemoryRange(base, size);
-	  AllocRecord *ar = new AllocRecord(filename, line, varname, vartype, fr->vi);
+	  AllocRecord *ar = new AllocRecord(filename, line, varname, vartype, fr->vi,
+					    item_size, item_number);
 
 	  map<MemoryRange, AllocRecord>::iterator it =
 	    allocmap.find(*mr);
@@ -1127,10 +1134,14 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
 	if(it != allocmap.end())
 	{
 	    /* We found the allocation record corresponding to that memory access.
-	     * If it is a part of a larger structure, let's find out the field name 
+	     * If it is a part of a larger structure, let's find out the field name.
+	     * Need to retrieve the offset into the data structure. If this allocation
+	     * contains multiple items (e.g., calloc-type), need to take the modulo
+	     * of the item size.
 	     */
 	    string field = "";
-	    size_t offset = addr - it->first.base;
+	    size_t offset = (addr - it->first.base) % it->second.item_size;
+	    
 	    if(offset >= 0)
 		field = it->second.vi->fieldname(it->second.sourceFile, 
 						 it->second.sourceLine, 
@@ -1139,13 +1150,12 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
 	    cout << (char*)accessType << " " << PIN_ThreadId() << " 0x" << hex << setw(16) 
 		 << setfill('0') << addr << dec << " " << size << " " 
 		 << name << " " << source << " " << it->second.sourceFile
-		 << ":" << it->second.sourceLine << " " << it->second.varName 
-		 << " " << it->second.varType;
+		 << ":" << it->second.sourceLine << " " << it->second.varName;
 
 	    if(field.length() > 0)
 		cout << "->" << field;
-
-	    cout << endl;
+ 
+	    cout << " " << it->second.varType << endl;
 	}
 	else
 	{
