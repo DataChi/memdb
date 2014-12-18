@@ -15,7 +15,8 @@
 # func                number   size   addr
 #
 __wt_calloc              1       2     3 
-!__wt_calloc_def         1      -1     2
+!__wt_calloc_def        -1      -1     2
+!__wt_calloc_one        -1      -1     1
 !__wt_block_size_alloc  -1      -1     1 
 !__bit_alloc            -1      -1     2
 #malloc                 -1       0    -1
