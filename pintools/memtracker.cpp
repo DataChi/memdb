@@ -196,7 +196,7 @@ public:
 
     bool operator<( const MemoryRange& other) const
 	{
-	    if( base+size < other.base )
+	    if( base+size <= other.base )
 	    {
 		return true;
 	    }
@@ -204,6 +204,13 @@ public:
 		return false;
 	};
 
+    bool contains(ADDRINT address) const
+	{
+	    if(address >= base && address <= base+size)
+		return true;
+	    else 
+		return false;
+	}
 };
 
 class AllocRecord
@@ -214,14 +221,15 @@ public:
     string  varName;
     string varType;
     VarInfo *vi;
+    size_t base;
     size_t item_size;
     size_t item_number;
 
     AllocRecord(string file, int line, 
 		string varname, string vartype, VarInfo *v,
-		size_t size, size_t number):
+		size_t base_addr, size_t size, size_t number):
 	sourceFile(file), sourceLine(line), varName(varname), 
-	varType(vartype), vi(v), item_size(size), item_number(number) {};
+	varType(vartype), vi(v), base(base_addr), item_size(size), item_number(number) {};
 };
 
 map<MemoryRange, AllocRecord> allocmap;
@@ -1001,7 +1009,7 @@ VOID callAfterAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr)
 	  size_t item_number = 	(*fr->thrAllocData)[tid]->number;
 	  MemoryRange *mr = new MemoryRange(base, size);
 	  AllocRecord *ar = new AllocRecord(filename, line, varname, vartype, fr->vi,
-					    item_size, item_number);
+					    base, item_size, item_number);
 
 	  map<MemoryRange, AllocRecord>::iterator it =
 	    allocmap.find(*mr);
@@ -1139,6 +1147,21 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
 	     * contains multiple items (e.g., calloc-type), need to take the modulo
 	     * of the item size.
 	     */
+
+	    if(!it->first.contains(addr))
+	    {
+		cout << "ERROR!!! " << hex << addr <<"+" << size 
+		     << " is not contained in (" << 
+		    it->first.base << ", " << (it->first.base + it->first.size) << ")"
+		     << dec << endl;
+
+		cerr << "ERROR!!! " << hex << addr <<"+" << size 
+		     << " is not contained in (" << 
+		    it->first.base << ", " << (it->first.base + it->first.size) << ")"
+		     << dec << endl;
+
+	    }
+
 	    string field = "";
 	    size_t offset = (addr - it->first.base) % it->second.item_size;
 	    
@@ -1147,6 +1170,12 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
 						 it->second.sourceLine, 
 						 it->second.varName, offset);
 
+	    if(field.length() == 0)
+		cout << "Could not determine field for the following access type. "
+		     << "Allocation base was " << hex << it->second.base 
+		     << " Size " << dec << it->second.item_size << ", number " 
+		     << it->second.item_number << ". Offset provided was " << offset << endl;
+	    
 	    cout << (char*)accessType << " " << PIN_ThreadId() << " 0x" << hex << setw(16) 
 		 << setfill('0') << addr << dec << " " << size << " " 
 		 << name << " " << source << " " << it->second.sourceFile
@@ -1301,7 +1330,7 @@ VOID Image(IMG img, VOID *v)
 	    RTN_Open(rtn);
 
 	    // Instrument 
-	    if(fp->number > 0 && fp->size > 0  && fp->retaddr > 0)
+	    if(fp->number >= 0 && fp->size >= 0  && fp->retaddr >= 0)
 	    {
 		RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)callBeforeAlloc,
 			       IARG_PTR, fr, IARG_THREAD_ID, IARG_RETURN_IP, 
@@ -1309,7 +1338,7 @@ VOID Image(IMG img, VOID *v)
 			       IARG_FUNCARG_ENTRYPOINT_VALUE, fp->size,
 			       IARG_FUNCARG_ENTRYPOINT_VALUE, fp->retaddr, IARG_END);
 	    }
-	    else if(fp->number == -1 && fp->size > 0 && fp->retaddr > 0)
+	    else if(fp->number == -1 && fp->size >= 0 && fp->retaddr >= 0)
 	    {
 		RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)callBeforeAlloc,
 			       IARG_PTR, fr, IARG_THREAD_ID, IARG_RETURN_IP, 
@@ -1326,7 +1355,7 @@ VOID Image(IMG img, VOID *v)
 			       IARG_FUNCARG_ENTRYPOINT_VALUE, fp->size,
 			       IARG_ADDRINT, 0, IARG_END);
 	    }
-	    else if(fp->number > 0 && fp->size > 0  && fp->retaddr == -1)
+	    else if(fp->number >= 0 && fp->size >= 0  && fp->retaddr == -1)
 	    {
 		RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)callBeforeAlloc,
 			       IARG_PTR, fr, IARG_THREAD_ID, IARG_RETURN_IP, 
@@ -1639,7 +1668,7 @@ Stack* get_thread_stack(pid_t pid, pid_t tid)
 		    cerr << "Offending line is: " << endl;
 		    cerr << line << endl;
 		    free(line);
-		    pclose(cmd_output);
+	    pclose(cmd_output);
 		    return NULL;
 		}
 		end_ptr++;
