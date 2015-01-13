@@ -1104,6 +1104,7 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
     if(inTracked[PIN_ThreadId()] == NO)
 	return;
 
+
     if(!KnobTrackStackAccesses)
     {
 	if(processStack.contains((size_t)addr))
@@ -1184,13 +1185,26 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
 	    if(field.length() > 0)
 		cout << "->" << field;
  
-	    cout << " " << it->second.varType << endl;
+	    cout << " " << it->second.varType;
+        if (((char *)accessType)[0] == 'w') {
+            UINT64 dst = 0;
+            PIN_SafeCopy(&dst,(const VOID *)addr, size);
+            cout << " " << dst;
+        }
+
+        cout << endl;
 	}
 	else
 	{
 	    cout << (char*)accessType << " " << PIN_ThreadId() << " 0x" << hex << setw(16) 
 		 << setfill('0') << addr << dec << " " << size << " " 
-		 << name << " " << source << endl;
+		 << name << " " << source;
+        if (((char *)accessType)[0] == 'w') {
+            UINT64 dst = 0;
+            PIN_SafeCopy(&dst,(const VOID *)addr, size);
+            cout << " " << dst;
+        }
+        cout << endl;
 	}
     }
     cout.flush();
@@ -1232,9 +1246,17 @@ VOID Instruction(INS ins, VOID *v)
      * On the IA-32 and Intel(R) 64 architectures conditional moves and REP 
      * prefixed instructions appear as predicated instructions in Pin.
      */
+
     UINT32 memOperands = INS_MemoryOperandCount(ins);
     ADDRINT insAddr = INS_Address(ins);
     RTN rtn = RTN_FindByAddress(insAddr);
+
+    // This will kick us out of call and unconditional branch instruction instrumentation,
+    // but it's easier to get the value being written this way
+    // If the instructino has fall-throught, we can instrument at IPOINT_AFTER
+    if (!INS_HasFallThrough(ins)) {
+        return;
+    }
 
     // Iterate over each memory operand of the instruction.
     for (UINT32 memOp = 0; memOp < memOperands; memOp++)
@@ -1242,7 +1264,7 @@ VOID Instruction(INS ins, VOID *v)
         if (INS_MemoryOperandIsRead(ins, memOp))
         {
             INS_InsertPredicatedCall(
-                ins, IPOINT_BEFORE, (AFUNPTR)recordMemoryAccess,
+                ins, IPOINT_AFTER, (AFUNPTR)recordMemoryAccess,
 		IARG_MEMORYOP_EA, memOp, 
 		IARG_MEMORYREAD_SIZE, 
 		IARG_INST_PTR,
@@ -1257,14 +1279,13 @@ VOID Instruction(INS ins, VOID *v)
         if (INS_MemoryOperandIsWritten(ins, memOp))
         {
             INS_InsertPredicatedCall(
-                ins, IPOINT_BEFORE, (AFUNPTR)recordMemoryAccess,
-		IARG_MEMORYOP_EA, memOp, 
-		IARG_MEMORYWRITE_SIZE, 
-		IARG_INST_PTR,
-		IARG_PTR, RTN_Address(rtn),
-		IARG_PTR, writeStr, 
+                ins, IPOINT_AFTER, (AFUNPTR)recordMemoryAccess,
+                IARG_MEMORYOP_EA, memOp, 
+                IARG_MEMORYWRITE_SIZE, 
+                IARG_INST_PTR,
+                IARG_PTR, RTN_Address(rtn),
+                IARG_PTR, writeStr, 
                 IARG_END);
-
         }
     }
 }
