@@ -38,7 +38,7 @@
 //#define DEBUG_PRINT
 
 #ifdef DEBUG_PRINT
-#define MY_PRINT(...)	printf(__VA_ARGS__)
+#define MY_PRINT(...)	fprintf(stderr, __VA_ARGS__)
 #else
 #define MY_PRINT(...)
 #endif
@@ -47,12 +47,22 @@ namespace {
 	// BaseTypes describe build-in and derived system data types like
 	// "int", "char", etc. Base types are identified by an offset in
 	//.debug_info section. Offsets are defined per compilation unit.
-	typedef std::map<size_t, std::string> BaseTypesFile_t;
+	struct basetype_desc {
+		size_t size;
+		size_t count;
+		std::string name;
+	};
+
+	typedef std::map<size_t, basetype_desc> BaseTypesFile_t;
 	typedef std::map<std::string, BaseTypesFile_t> BaseTypes_t;
 
 	// int - hash(type offset + file name)
 	auto hasher = std::hash<std::string>();
-	typedef std::map<unsigned, std::string> FieldsNames_t;
+	struct fieldname_desc {
+		size_t typeoffset;
+		std::string name;
+	};
+	typedef std::map<unsigned, fieldname_desc> FieldsNames_t;
 	typedef std::map<int, FieldsNames_t> StructFields_t;
 
 	// BaseType suffix describes intermediate base type modifier such as const or 'pointer'
@@ -60,6 +70,13 @@ namespace {
 	typedef std::map<std::string, BaseTypeSuffixFile_t> BaseTypeSuffix_t;
 	// SrcFiles describe source files described in .debug_info section.
 	typedef std::map<size_t, std::string> SrcFiles_t;
+
+	// @sa ::validate_member
+	enum {
+			VRES_NOT_ARRAY = -1,
+			VRES_NESTED_STRUCTURE = -2,
+			VRES_UNKNOWN = -3,
+		};
 
 	// Variables describe every variable declared in a program
 	struct Variable {
@@ -108,18 +125,57 @@ namespace {
 			//printf("TYPING: %d\n", current_offset);
 			std::string suffix;
 			do {
-				std::stringstream ss((*_basetypes)[file()][current_offset]);
+				std::stringstream ss((*_basetypes)[file()][current_offset].name);
 				ss >> next_offset;
+
 				//printf("TYPING: %d\n", next_offset);
-				if (ss.rdstate() & std::ios::failbit)
-					return (*_basetypes)[file()][current_offset] +
-						suffix;
+				if (ss.rdstate() & std::ios::failbit) {
+					if ((*_basetypes)[file()][current_offset].name.empty())
+						return "void" + (suffix.empty() ? "*" : suffix);
+					else
+						return (*_basetypes)[file()][current_offset].name +
+							suffix;
+				}
 				suffix = (*_basetypesuffix)[file()][current_offset] +
 					suffix;
 				current_offset = next_offset;
 			} while(--i > 0);
 			return std::string();
 		}
+	
+		int validate_member(const size_t in_str_offset, const size_t type_offset, const size_t nearest_field_offset) const {
+			unsigned tsize = 0, tcount = 0;
+
+			size_t current_offset = type_offset;
+			static const int max_refs = 256;
+			int i = max_refs;	
+			int next_offset = 0;
+			do {
+				const auto& str = (*_basetypes)[file()][current_offset];
+				if (!tcount && str.count)
+					tcount = str.count;
+				if (!tsize && str.size)
+					tsize = str.size;
+					
+				std::stringstream ss(str.name);
+				ss >> next_offset;
+				if (0 == next_offset)
+					break;;
+				current_offset = next_offset;
+			} while(--i > 0);
+			if (0 == tcount) {
+				if (in_str_offset < nearest_field_offset + tsize)
+					return VRES_NESTED_STRUCTURE;
+				else
+					return VRES_UNKNOWN;
+			}
+
+			if ((in_str_offset < tsize * tcount) &&
+				(in_str_offset % tsize == 0))
+				return in_str_offset / tsize;
+			return VRES_NOT_ARRAY;
+		}
+
 		inline size_t type_offset() const { return _type_offset; }
 		// Go to chain of types to get to a main type
 		// `typedef struct { int a, int b; } mytype;`
@@ -129,7 +185,7 @@ namespace {
 			int i = max_refs;	
 			int next_offset = 0;
 			do {
-				std::stringstream ss((*_basetypes)[file()][current_offset]);
+				std::stringstream ss((*_basetypes)[file()][current_offset].name);
 				ss >> next_offset;
 				if (0 == next_offset)
 					return current_offset;
@@ -167,7 +223,30 @@ public:
 		int hash = hasher(var->file() + std::to_string(var->get_top_offset()));
 		//printf("REQUIRES: off=%d file=%s\n", var->get_top_offset(),
 		//	var->file().c_str());
-		return _struct_fields[hash][offset];
+		
+		//unsigned __off = _struct_fields[hash][offset].typeoffset;
+		const auto &str = _struct_fields[hash];
+		//for (auto j : str) {
+		//	printf("<%u> %s\n", j.first, j.second.name.c_str());
+		//}
+		auto i = str.rbegin();
+		for (; str.rend() != i; ++i) {
+			if (i->first <= offset) break;
+		}
+		if (str.rend() == i)
+			return "<Unknown>";
+		int idx = var->validate_member(offset, i->second.typeoffset, i->first);
+		if (VRES_NOT_ARRAY == idx) {
+			if (i->first == offset)
+				return i->second.name;
+			else
+				return "<Unknown>";
+		}
+		else if (VRES_NESTED_STRUCTURE == idx)
+			return i->second.name;
+		else if (VRES_UNKNOWN == idx)
+			return "<Unknown>";
+		return i->second.name + "[" + std::to_string(idx) + "]";
 	}
 
 	const std::string type(const std::string& file,
@@ -210,7 +289,7 @@ private:
 		_vars.pop_back();
 	}
 
-	std::string& newBaseType(const size_t offset, const std::string& file) {
+	basetype_desc& newBaseType(const size_t offset, const std::string& file) {
 		return _base_types[file][offset];
 	}
 
@@ -231,9 +310,11 @@ private:
 	struct TypeContainer {
 		bool		_valid;
 		unsigned _type_offset;
+		unsigned _field_type_offset;
 		std::string _fieldname;
 		int			_offset;
 		FieldsNames_t *_fields;
+		basetype_desc *_basetype;
 	};
 
 #ifdef __linux
@@ -241,7 +322,6 @@ private:
 	std::map<Dwarf_Addr, Dwarf_Unsigned> _pcaddr2line;
 	std::string _file;
 	std::string _comp_dir;
-	bool _scoping_init;
 
 	int _die_stack_indent_level;	// nesting level of the current DIEs
 	int _vis_start_line;			// line where the current scope starts
@@ -252,7 +332,7 @@ private:
 		Dwarf_Attribute attr_in, int die_indent_level,
 		const char *tag_name, char **srcfiles, const std::vector<std::string>& srclist, const char **const cfile,
 		Dwarf_Signed cnt, Dwarf_Off parent_offset,
-		Variable *const var = 0, std::string *const basetype = 0,
+		Variable *const var = 0, basetype_desc *const basetype = 0,
 		TypeContainer ** tcon = 0) {
 
 		const char *v = 0;
@@ -305,10 +385,12 @@ private:
 
 			if (!!(*tcon) && (*tcon)->_valid) {
 				(*tcon)->_offset = offset;
-				(*(*tcon)->_fields)[offset] = (*tcon)->_fieldname;
-				MY_PRINT("@FIELD: [%d] off=%d field=%s\n",
+				(*(*tcon)->_fields)[offset].name = (*tcon)->_fieldname;
+				(*(*tcon)->_fields)[offset].typeoffset = (*tcon)->_field_type_offset;
+				MY_PRINT("@FIELD: [%d] off=%d field=%s fieldtype=%d\n",
 					(*tcon)->_type_offset, offset,
-					(*tcon)->_fieldname.c_str());
+					(*tcon)->_fieldname.c_str(),
+					(*tcon)->_field_type_offset);
 			}
 	
 			dwarf_dealloc(dbg, tempb, DW_DLA_BLOCK);
@@ -321,11 +403,7 @@ private:
 			*cfile = _file.c_str();	
 			MY_PRINT("\"%s\" ", name);
 			_comp_dir = name;
-			//if (!_scoping_init)
-			{
-				_scoping.init(srclist, _comp_dir + '/');
-				_scoping_init = true;
-			}
+			_scoping.init(srclist, _comp_dir + '/');
 			dwarf_dealloc(dbg, name, DW_DLA_STRING); 
 		} else if (SEQ("DW_AT_name")) {
 			char *name = 0;
@@ -338,7 +416,7 @@ private:
 				var->setName(name);
 				var->setVisEndLine(_vis_end_line);
 			} else if (!!basetype) {
-				*basetype = name;
+				basetype->name = name;
 			}
 			if (!!(*tcon) && (*tcon)->_valid) {
 				(*tcon)->_fieldname = name;
@@ -383,6 +461,20 @@ private:
 			if (!!var)
 				var->setLine(uval);
 		}
+		else if (SEQ("DW_AT_upper_bound") || SEQ("DW_AT_byte_size")) {
+			Dwarf_Unsigned val = 0;
+			sres = dwarf_formudata(attr_in, &val, &err);
+			if (DW_DLV_OK != sres) { SAY_AND_GO("failed to read data attribute\n"); goto dealloc_form; }
+			MY_PRINT("\"%lli\"", val);
+			if (SEQ("DW_AT_byte_size") && !!basetype) {
+				basetype->size = val;
+			}
+			if (SEQ("DW_AT_upper_bound")) {
+				if (!!tcon && !!*tcon) {
+					(*tcon)->_basetype->count = val;
+				}
+			}
+		}
 		else if (SEQ("DW_AT_low_pc") || SEQ("DW_AT_high_pc")) {
 			Dwarf_Addr addr = 0;
 			sres = dwarf_formaddr(attr_in, &addr, &err);
@@ -410,7 +502,7 @@ private:
 			else if (!!basetype) {
 				std::stringstream ss;
 				ss << offset;
-				*basetype = ss.str();
+				basetype->name = ss.str();
 				if (0 == strcmp(tag_name, "DW_TAG_pointer_type"))
 					_base_type_suffix[_file][parent_offset] = "*";
 				else if (0 == strcmp(tag_name, "DW_TAG_const_type"))
@@ -420,6 +512,10 @@ private:
 				else if (0 == strcmp(tag_name, "DW_TAG_volatile_type"))
 					_base_type_suffix[_file][parent_offset] = " volatile";
 			}
+
+			if (!!(*tcon) && (*tcon)->_valid) {
+				(*tcon)->_field_type_offset = offset;
+			}	
 			MY_PRINT("<0x%08llu> ", offset);
 		}
 		MY_PRINT("\n");
@@ -447,7 +543,7 @@ dealloc_attr:;
 		Dwarf_Attribute *atlist = 0;
 		int atres = 0;
 		Variable *var = 0;
-		std::string *basetype = 0;
+		basetype_desc *basetype = 0;
 		Dwarf_Off offset = 0;	
 	
 		int res = dwarf_get_TAG_name(tag, &tagname);
@@ -471,6 +567,8 @@ dealloc_attr:;
 			&& !SEQ1("DW_TAG_structure_type")
 			&& !SEQ1("DW_TAG_class_type")
 			&& !SEQ1("DW_TAG_member")
+			&& !SEQ1("DW_TAG_array_type")
+			&& !SEQ1("DW_TAG_subrange_type")
 			)
 			goto dealloc_tag_name;
 
@@ -494,18 +592,22 @@ dealloc_attr:;
 			0 == strcmp(tagname, "DW_TAG_volatile_type") ||
 			0 == strcmp(tagname, "DW_TAG_typedef") ||
 			0 == strcmp(tagname, "DW_TAG_structure_type") ||
-			0 == strcmp(tagname, "DW_TAG_class_type")) {
+			0 == strcmp(tagname, "DW_TAG_class_type") ||
+			0 == strcmp(tagname, "DW_TAG_array_type")) {
 			basetype = &newBaseType(offset, _file);
 			//printf("%s ", tagname);
 			//printf("=TYPES: off=%d file=%s\n", offset, _file.c_str());
 		}
 
-		if (0 == strcmp(tagname, "DW_TAG_structure_type") ||
-			0 == strcmp(tagname, "DW_TAG_class_type")) {
+		if (die_indent_level <= 1 && 
+			(0 == strcmp(tagname, "DW_TAG_structure_type") ||
+			0 == strcmp(tagname, "DW_TAG_class_type") ||
+			0 == strcmp(tagname, "DW_TAG_array_type"))) {
 			delete (*tcon);
 			*tcon = new TypeContainer;
 			(*tcon)->_type_offset = offset;
 			(*tcon)->_fields = &_struct_fields[hasher(_file + std::to_string((*tcon)->_type_offset))];
+			(*tcon)->_basetype = basetype;
 				//printf("=FIELDS: off=%d file=%s\n", (*tcon)->_type_offset, _file.c_str());
 
 		}
@@ -559,9 +661,9 @@ dealloc_attr:;
 				var->file().c_str());
 		}
 		else if (!!basetype) {
-			MY_PRINT("@BASETYPE: %llu[%s] -> %s \"%s\" (%s)\n", offset,
-				tagname, basetype->c_str(),
-				_base_type_suffix[_file][offset].c_str(), _file.c_str());
+			MY_PRINT("@BASETYPE: %llu[%s] -> %s \"%s\", size=%lu, count=%lu (%s)\n", offset,
+				tagname, basetype->name.c_str(),
+				_base_type_suffix[_file][offset].c_str(), basetype->size, basetype->count, _file.c_str());
 		}
 		//dwarf_dealloc(dbg, (void *)tagname, DW_DLA_STRING);
 		return true;
@@ -769,7 +871,7 @@ dealloc_tag_name:
 
 		Elf * elf = elf_begin(fd, ELF_C_READ, NULL);
 		if (ELF_K_AR == elf_kind(elf)) {
-			MY_PRINT("the file is an archieve\n");
+			MY_PRINT("the file is an archive\n");
 			close(fd);
 			return 0;
 		}
@@ -786,15 +888,15 @@ dealloc_tag_name:
 	};
 
 	bool read_file_debug(const char * file) {	
-		int fd = open(file, O_RDWR);
+		int fd = open(file, O_RDONLY);
 		if (-1 == fd) {
-			MY_PRINT("cannot find the file to open..\n");
+		  MY_PRINT("cannot open file %s\n", file);
 			return false;
 		}
 
 		struct stat elf_stats;
 		if ((fstat(fd, &elf_stats))) {
-			MY_PRINT("cannot stat the file\n");
+		  MY_PRINT("cannot stat file %s\n", file);
 			return false;
 		}
 
@@ -808,7 +910,6 @@ dealloc_tag_name:
 
 bool VarInfo::Imp::init(const std::string& file) {
 #ifdef __linux
-	_scoping_init = false;
 	_file = file;
 	_die_stack_indent_level = 0;
 	return read_file_debug(file.c_str());

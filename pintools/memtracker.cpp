@@ -1150,12 +1150,12 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
 
 	    if(!it->first.contains(addr))
 	    {
-		cout << "ERROR!!! " << hex << addr <<"+" << size 
+		cout << "WARNING!!! " << hex << addr <<"+" << size 
 		     << " is not contained in (" << 
 		    it->first.base << ", " << (it->first.base + it->first.size) << ")"
 		     << dec << endl;
 
-		cerr << "ERROR!!! " << hex << addr <<"+" << size 
+		cerr << "WARNING!!! " << hex << addr <<"+" << size 
 		     << " is not contained in (" << 
 		    it->first.base << ", " << (it->first.base + it->first.size) << ")"
 		     << dec << endl;
@@ -1165,7 +1165,7 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
 	    string field = "";
 	    size_t offset = (addr - it->first.base) % it->second.item_size;
 	    
-	    if(offset >= 0)
+	    if(offset >= 0 && it->second.vi)
 		field = it->second.vi->fieldname(it->second.sourceFile, 
 						 it->second.sourceLine, 
 						 it->second.varName, offset);
@@ -1400,7 +1400,7 @@ bool parseFunctionList(const char *fname, vector<string> &list, file_mode_t mode
     if(f.fail())
     {
 	cerr << "Failed to open required file " << fname << endl;
-	return false;
+	exit(-1);
     }
 
     cout << "Routines specified for instrumentation:" << endl;
