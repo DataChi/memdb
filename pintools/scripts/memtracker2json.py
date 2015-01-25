@@ -112,14 +112,14 @@ class FuncRecord:
 
 def parseAlloc(line, out):
 
-    threadID = "<unknown>";
-    addr = "<unknown>";
-    funcName = "<unknown>";
-    size = "<unknown>";
-    numItems = "<unknown>";
-    sourceLoc = "<unknown>";
-    varName = "<unknown>";
-    varType = "<unknown>";
+    threadID = "-";
+    addr = "-";
+    funcName = "-";
+    size = "-";
+    numItems = "-";
+    sourceLoc = "-";
+    varName = "-";
+    varType = "-";
 
     words = line.split(" ");
             
@@ -152,15 +152,15 @@ def parseAlloc(line, out):
 
 def parseMemoryAccess(line, out):
 
-    accessType = "<unknown>";
-    threadID = "<unknown>";
-    addr = "<unknown>";
-    size = "<unknown>";
-    funcName = "<unknown>";
-    sourceLoc = "<unknown>";
-    varName = "<unknown>";
-    varType = "<unknown>";
-    allocLoc = "<unknown>";
+    accessType = "-";
+    threadID = "-";
+    addr = "-";
+    size = "-";
+    funcName = "-";
+    sourceLoc = "-";
+    varName = "-";
+    varType = "-";
+    allocLoc = "-";
 
 
     words = line.split(" ");
@@ -199,8 +199,8 @@ def parseMemoryAccess(line, out):
 def parseFunction(line, out):
 
     eventType = "";
-    threadID = "<unknown>";
-    funcName = "<unknown>";
+    threadID = "-";
+    funcName = "-";
     
     words = line.split(" ");
             

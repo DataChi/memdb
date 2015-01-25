@@ -537,8 +537,12 @@ bool fileError(ifstream &sourceFile, string file, int line)
     {
 	cerr << "Error parsing file " << file << endl;
 	if(sourceFile.eof())
+	{
 	    cerr << "Reached end of file before reaching line "
 		 << line << endl;
+	    cout << "Reached end of file before reaching line "
+		 << line << endl;
+	}
 	else
 	    cerr << "Unknown I/O error " << endl;
 	return true;
@@ -928,8 +932,7 @@ VOID callBeforeAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr, ADDRINT number,
 		     ADDRINT size, ADDRINT retptr)
 {
     /* We were called before the application has begun running main.
-     * This can happen for malloc calls. Don't do anything. But tell the
-     * python GDB driver to let us continue. 
+     * This can happen for malloc calls. Don't do anything. 
      */
     if(!go)
 	return;
@@ -1151,12 +1154,12 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
 
 	    if(!it->first.contains(addr))
 	    {
-		cout << "ERROR!!! " << hex << addr <<"+" << size 
+		cout << "WARNING!!! " << hex << addr <<"+" << size 
 		     << " is not contained in (" << 
 		    it->first.base << ", " << (it->first.base + it->first.size) << ")"
 		     << dec << endl;
 
-		cerr << "ERROR!!! " << hex << addr <<"+" << size 
+		cerr << "WARNING!!! " << hex << addr <<"+" << size 
 		     << " is not contained in (" << 
 		    it->first.base << ", " << (it->first.base + it->first.size) << ")"
 		     << dec << endl;
@@ -1166,7 +1169,7 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
 	    string field = "";
 	    size_t offset = (addr - it->first.base) % it->second.item_size;
 	    
-	    if(offset >= 0)
+	    if(offset >= 0 && it->second.vi)
 		field = it->second.vi->fieldname(it->second.sourceFile, 
 						 it->second.sourceLine, 
 						 it->second.varName, offset);
@@ -1366,7 +1369,6 @@ VOID Image(IMG img, VOID *v)
 			       IARG_ADDRINT, 1, 
 			       IARG_FUNCARG_ENTRYPOINT_VALUE, fp->size,
 			       IARG_FUNCARG_ENTRYPOINT_VALUE, fp->retaddr, IARG_END);
-
 	    }
 	    else if(fp->number == -1 && fp->size >= 0 && fp->retaddr == -1)
 	    {
@@ -1374,7 +1376,7 @@ VOID Image(IMG img, VOID *v)
 			       IARG_PTR, fr, IARG_THREAD_ID, IARG_RETURN_IP, 
 			       IARG_ADDRINT, 1, 
 			       IARG_FUNCARG_ENTRYPOINT_VALUE, fp->size,
-			       IARG_ADDRINT, 0, IARG_END);
+			       IARG_UINT32, 0, IARG_END);
 	    }
 	    else if(fp->number >= 0 && fp->size >= 0  && fp->retaddr == -1)
 	    {
@@ -1382,8 +1384,7 @@ VOID Image(IMG img, VOID *v)
 			       IARG_PTR, fr, IARG_THREAD_ID, IARG_RETURN_IP, 
 			       IARG_FUNCARG_ENTRYPOINT_VALUE, fp->number, 
 			       IARG_FUNCARG_ENTRYPOINT_VALUE, fp->size,
-			       IARG_ADDRINT, 0, IARG_END);
-
+			       IARG_UINT32, 0, IARG_END);
 	    }
 	    else {
 		cerr << "I did not understand this function prototype: " << endl
@@ -1421,7 +1422,7 @@ bool parseFunctionList(const char *fname, vector<string> &list, file_mode_t mode
     if(f.fail())
     {
 	cerr << "Failed to open required file " << fname << endl;
-	return false;
+	exit(-1);
     }
 
     cout << "Routines specified for instrumentation:" << endl;
