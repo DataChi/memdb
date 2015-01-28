@@ -61,7 +61,7 @@ class FreeRecord:
 class AccessRecord:
 
     def __init__(self, accessType, threadID, addr, size, funcName, sourceLoc,  
-                 varName, varType, allocLoc):
+                 varName, varType, allocLoc, value):
 
         self.accessType = accessType;
         self.threadID = threadID;
@@ -72,13 +72,14 @@ class AccessRecord:
         self.varName = varName;
         self.varType = varType;
         self.allocLoc = allocLoc;
+        self.value = value;
 
 
     def non_json_str_(self):
         return (self.accessType + " "  + self.threadID + " " + self.addr + " " 
                 + self.size + " " + self.funcName + " " + self.sourceLoc + " "
                 + self.varName + " " + self.varType + " "
-                + self.allocLoc);
+                + self.allocLoc + " " + self.value);
 
     def __str__(self):
         return("{\"event\": \"memory-access\", " 
@@ -90,7 +91,9 @@ class AccessRecord:
                "\"source-location\": \"" + self.sourceLoc + "\", "
                "\"alloc-location\": \"" + self.allocLoc + "\", "
                "\"var-name\": \"" + self.varName + "\", "
-               "\"var-type\": \"" + self.varType + "\"}");
+               "\"var-type\": \"" + self.varType + "\", "
+               "\"value\": \"" + str(self.value) + "\" }");
+
 
 
 class FuncRecord:
@@ -151,7 +154,6 @@ def parseAlloc(line, out):
 
 
 def parseMemoryAccess(line, out):
-
     accessType = "-";
     threadID = "-";
     addr = "-";
@@ -161,7 +163,7 @@ def parseMemoryAccess(line, out):
     varName = "-";
     varType = "-";
     allocLoc = "-";
-
+    value = "-";
 
     words = line.split(" ");
             
@@ -183,14 +185,18 @@ def parseMemoryAccess(line, out):
         if(i == 7):
             varName = words[i];
         if(i == 8):
-            varType = words[i]; 
+            if (i != len(words) - 1):
+                varType = words[i]; 
         if(i > 8):
-            varType = varType + " " + words[i]; 
+            if (accessType == "write" and i == len(words)-1):
+                value = words[i];
+            else:
+                varType = varType + " " + words[i]; 
 
 
 
     r = AccessRecord(accessType, threadID, addr, size, funcName, sourceLoc,
-                     varName, varType, allocLoc);
+                     varName, varType, allocLoc, value);
     
     out.write(str(r) + "\n");
 
