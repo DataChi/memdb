@@ -167,6 +167,9 @@ KNOB<bool> KnobTrackStackAccesses(KNOB_MODE_WRITEONCE, "pintool",
 				  "s", "false", "Include stack memory accesses into the "
 				  "trace. Default is false. ");
 
+KNOB<bool> KnobTrackAllocOnly(KNOB_MODE_WRITEONCE, "pintool",
+                "l", "false", "If set to true, memdb won't track"
+                " accesses, only allocations.");
 
 
 
@@ -1190,7 +1193,7 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
  
 	    cout << " " << it->second.varType;
         if (((char *)accessType)[0] == 'w') {
-            UINT64 dst = 0;
+            float dst;
             PIN_SafeCopy(&dst,(const VOID *)addr, size);
             cout << " " << dst;
         }
@@ -1331,11 +1334,11 @@ VOID Image(IMG img, VOID *v)
 
 		if (!vi->init(IMG_Name(img)))
 		{
-		    cerr<<"Failed to initialize VarInfo for image " << IMG_Name(img) << endl;
+		    cerr << "Failed to initialize VarInfo for image " << IMG_Name(img) << endl;
 		    delete vi;
 		    vi = NULL;
 		}
-	    }
+        }
 
 	    FuncRecord *fr;
 	    cout << "Procedure " << fp->name << " located." << endl;
@@ -1606,7 +1609,9 @@ int main(int argc, char *argv[])
     RTN_AddInstrumentFunction(instrumentRoutine, 0);
 
     /* Instrument tracing memory accesses */
-    INS_AddInstrumentFunction(Instruction, 0);
+    if (!KnobTrackAllocOnly) {
+        INS_AddInstrumentFunction(Instruction, 0);
+    }
 
     IMG_AddInstrumentFunction(Image, 0);
     PIN_AddThreadStartFunction(ThreadStart, 0);
