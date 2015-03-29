@@ -338,6 +338,10 @@ void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VO
 #endif
 }
 
+void logAlloc() {
+
+}
+
 vector<FuncRecord*> funcRecords;
 unsigned int largestUnusedThreadID = 0;
 
