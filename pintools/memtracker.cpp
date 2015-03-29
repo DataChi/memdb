@@ -47,6 +47,10 @@ END_LEGAL */
 
 #include "varinfo.hpp"
 
+#define TRACE() cout << __FILE__ << " " << __LINE__ << endl;
+
+//#define LOGBINARY 1
+
 /* ===================================================================== */
 /* Global Variables */
  /* ===================================================================== */
@@ -171,6 +175,8 @@ KNOB<bool> KnobTrackAllocOnly(KNOB_MODE_WRITEONCE, "pintool",
                 "l", "false", "If set to true, memdb won't track"
                 " accesses, only allocations.");
 
+//KNOB<bool> KnobTrackBintrack(KNOB_MODE_WRITEONCE, "pintool",
+                //"b", "true", "Save output logs in binary format");
 
 
 /* ===================================================================== */
@@ -286,6 +292,51 @@ typedef struct func_record
     vector<FuncProto*> *otherFuncProto;
     vector<ThreadAllocData*> *thrAllocData; 
 } FuncRecord;
+
+typedef struct FunctionLogEntry_t {
+    char name[100];
+    func_event_t type;
+    uint32_t tid;
+} FunctionLogEntry;
+
+void logFunction(func_event_t eventType, string name) {
+#ifdef LOGBINARY
+    FunctionLogEntry le;
+    memset(le.name, 0, 100 * sizeof(char));
+    strcpy(le.name, name.c_str());
+    le.tid = PIN_ThreadId();
+    
+#else
+	    cout << (char*)funcEventNames[eventType] << " " << PIN_ThreadId() << " " 
+		 << name << endl;	 
+#endif
+}
+
+//VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr, 
+			   //VOID *rtnAddr, VOID *accessType)
+
+void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VOID *rtnAddr, AllocRecord *alloc, string source, string name, string field) {
+#ifdef LOGBINARY
+
+#else
+	    cout << (char*)accessType << " " << PIN_ThreadId() << " 0x" << hex << setw(16) 
+		 << setfill('0') << addr << dec << " " << size << " " 
+		 << name << " " << source << " " << (alloc ? alloc->sourceFile : "-")
+		 << ":" << (alloc ? alloc->sourceLine : 0) << " " << (alloc ? alloc->varName : "-");
+
+	    if(field.length() > 0)
+		cout << " ->" << field;
+ 
+	    cout << " " << (alloc ? alloc->varType : "-");
+
+        if (((char *)accessType)[0] == 'w') {
+            float dst;
+            PIN_SafeCopy(&dst,(const VOID *)addr, size);
+            cout << " " << dst;
+        }
+        cout << endl;
+#endif
+}
 
 vector<FuncRecord*> funcRecords;
 unsigned int largestUnusedThreadID = 0;
@@ -1088,8 +1139,7 @@ VOID callBeforeAfterFunction(VOID *rtnAddr, func_event_t eventType)
 	    inTracked[tid] = YES;
 
 	if(inTracked[tid] == YES)
-	    cout << (char*)funcEventNames[eventType] << " " << PIN_ThreadId() << " " 
-		 << name << endl;	 
+        logFunction(eventType, name);
 
 	if(funcNeedsTracking && eventType == FUNC_END)
 	    inTracked[tid] = NO;
@@ -1182,35 +1232,13 @@ VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr,
 		     << "Allocation base was " << hex << it->second.base 
 		     << " Size " << dec << it->second.item_size << ", number " 
 		     << it->second.item_number << ". Offset provided was " << offset << endl;
+
+        logAccess((char *)accessType, addr, size, codeAddr, rtnAddr, &(it->second), source, name, field); 
 	    
-	    cout << (char*)accessType << " " << PIN_ThreadId() << " 0x" << hex << setw(16) 
-		 << setfill('0') << addr << dec << " " << size << " " 
-		 << name << " " << source << " " << it->second.sourceFile
-		 << ":" << it->second.sourceLine << " " << it->second.varName;
-
-	    if(field.length() > 0)
-		cout << "->" << field;
- 
-	    cout << " " << it->second.varType;
-        if (((char *)accessType)[0] == 'w') {
-            float dst;
-            PIN_SafeCopy(&dst,(const VOID *)addr, size);
-            cout << " " << dst;
-        }
-
-        cout << endl;
 	}
 	else
 	{
-	    cout << (char*)accessType << " " << PIN_ThreadId() << " 0x" << hex << setw(16) 
-		 << setfill('0') << addr << dec << " " << size << " " 
-		 << name << " " << source;
-        if (((char *)accessType)[0] == 'w') {
-            UINT64 dst = 0;
-            PIN_SafeCopy(&dst,(const VOID *)addr, size);
-            cout << " " << dst;
-        }
-        cout << endl;
+        logAccess((char *)accessType, addr, size, codeAddr, rtnAddr, 0, source, name, ""); 
 	}
     }
     cout.flush();
