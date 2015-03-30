@@ -46,6 +46,7 @@ END_LEGAL */
 #include "pin.H"
 
 #include "varinfo.hpp"
+#include "binarylogging.hpp"
 
 #define TRACE() cout << __FILE__ << " " << __LINE__ << endl;
 
@@ -313,17 +314,11 @@ typedef struct func_record
     vector<ThreadAllocData*> *thrAllocData; 
 } FuncRecord;
 
-typedef struct FunctionLogEntry_t {
-    uint64_t time;
-    char name[100];
-    func_event_t type;
-    uint32_t tid;
-} FunctionLogEntry;
-
 void logFunction(func_event_t eventType, string name) {
 #ifdef LOGBINARY
     FunctionLogEntry fle;
     fle.time = getTimestamp();
+    fle.type = (eventType == FUNC_BEGIN ? 'b' : 'e');
     memset(fle.name, 0, 100 * sizeof(char));
     strcpy(fle.name, name.c_str());
     fle.tid = PIN_ThreadId();
@@ -334,19 +329,6 @@ void logFunction(func_event_t eventType, string name) {
     cout.flush();
 #endif
 }
-
-//VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr, 
-			   //VOID *rtnAddr, VOID *accessType)
-
-typedef struct AccessLogEntry_t {
-    uint64_t time;
-    char type;
-    uint32_t addr;
-    uint32_t size;
-    uint32_t codeAddr;
-    void * rtnAddr;
-    void * allocId;
-} AccessLogEntry;
 
 void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VOID *rtnAddr, AllocRecord *alloc, string source, string name, string field) {
 #ifdef LOGBINARY
@@ -379,15 +361,6 @@ void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VO
         cout.flush();
 #endif
 }
-
-typedef struct AllocLogEntry_t {
-    char type;
-    uint32_t addr;
-    uint32_t size;
-    uint32_t codeAddr;
-    void * rtnAddr;
-    void * allocId;
-} AllocLogEntry;
 
 void logAlloc(FuncRecord *fr, string filename, int line, string varname, string vartype) {
 #ifdef LOGBINARY
