@@ -49,7 +49,7 @@ END_LEGAL */
 
 #define TRACE() cout << __FILE__ << " " << __LINE__ << endl;
 
-//#define LOGBINARY 1
+#define LOGBINARY 1
 
 /* ===================================================================== */
 /* Global Variables */
@@ -301,23 +301,40 @@ typedef struct FunctionLogEntry_t {
 
 void logFunction(func_event_t eventType, string name) {
 #ifdef LOGBINARY
-    FunctionLogEntry le;
-    memset(le.name, 0, 100 * sizeof(char));
-    strcpy(le.name, name.c_str());
-    le.tid = PIN_ThreadId();
+    FunctionLogEntry fle;
+    memset(fle.name, 0, 100 * sizeof(char));
+    strcpy(fle.name, name.c_str());
+    fle.tid = PIN_ThreadId();
     
 #else
 	    cout << (char*)funcEventNames[eventType] << " " << PIN_ThreadId() << " " 
 		 << name << endl;	 
+    cout.flush();
 #endif
 }
 
 //VOID recordMemoryAccess(ADDRINT addr, UINT32 size, ADDRINT codeAddr, 
 			   //VOID *rtnAddr, VOID *accessType)
 
+typedef struct AccessLogEntry_t {
+    char type;
+    uint32_t addr;
+    uint32_t size;
+    uint32_t codeAddr;
+    void * rtnAddr;
+    void * allocId;
+} AccessLogEntry;
+
 void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VOID *rtnAddr, AllocRecord *alloc, string source, string name, string field) {
 #ifdef LOGBINARY
-
+    AccessLogEntry ale;
+    ale.type = accessType[0];
+    ale.addr = addr;
+    ale.size = size;
+    ale.codeAddr = codeAddr;
+    ale.rtnAddr = rtnAddr;
+    ale.allocId = alloc;
+    cout << ale.type << endl;
 #else
 	    cout << (char*)accessType << " " << PIN_ThreadId() << " 0x" << hex << setw(16) 
 		 << setfill('0') << addr << dec << " " << size << " " 
@@ -335,11 +352,27 @@ void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VO
             cout << " " << dst;
         }
         cout << endl;
+        cout.flush();
 #endif
 }
 
-void logAlloc() {
+void logAlloc(FuncRecord *fr, string filename, int line, string varname, string vartype) {
+#ifdef LOGBINARY
 
+#else
+    UINT32 tid = PIN_ThreadId();
+	cout << "alloc: " << tid
+	     << " 0x" << hex << setfill('0') << setw(16) << (*fr->thrAllocData)[tid]->addr 
+	     << dec << " " << fr->name  
+	     << " " << (*fr->thrAllocData)[tid]->size << " " 
+	     << (*fr->thrAllocData)[tid]->number 
+	     << " " << filename 
+	     << ":" << line
+	     << " " << varname 
+	     << " " << vartype
+         << endl;
+    cout.flush();
+#endif
 }
 
 vector<FuncRecord*> funcRecords;
@@ -1091,17 +1124,7 @@ VOID callAfterAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr)
 	
 	}
 	
-	cout << "alloc: " << tid 
-	     << " 0x" << hex << setfill('0') << setw(16) << (*fr->thrAllocData)[tid]->addr 
-	     << dec << " " << fr->name  
-	     << " " << (*fr->thrAllocData)[tid]->size << " " 
-	     << (*fr->thrAllocData)[tid]->number 
-	     << " " << filename 
-	     << ":" << line
-	     << " " << varname 
-	     << " " << vartype
-	     << endl; 
-	cout.flush();
+    logAlloc(fr, filename, line, varname, vartype);
     }
     PIN_ReleaseLock(&lock);
 
