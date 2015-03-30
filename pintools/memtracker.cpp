@@ -51,6 +51,17 @@ END_LEGAL */
 
 #define LOGBINARY 1
 
+uint64_t timestamp;
+PIN_LOCK timelock;
+
+uint64_t getTimestamp() {
+    uint64_t retval;
+    PIN_GetLock(&timelock, 0);
+    retval = timestamp++;
+    PIN_ReleaseLock(&timelock);
+    return retval;
+}
+
 /* ===================================================================== */
 /* Global Variables */
  /* ===================================================================== */
@@ -272,6 +283,15 @@ vector<FuncProto *> funcProto;
  * we keep this structure per-thread. 
  */
 
+enum {
+    LOG_FUNC,
+    LOG_ALLOC,
+    LOG_ACCESS,
+    NR_LOGS
+};
+
+ofstream logfiles[NR_LOGS];
+
 typedef struct thread_alloc_data
 {
     ADDRINT calledFromAddr;
@@ -294,6 +314,7 @@ typedef struct func_record
 } FuncRecord;
 
 typedef struct FunctionLogEntry_t {
+    uint64_t time;
     char name[100];
     func_event_t type;
     uint32_t tid;
@@ -302,10 +323,11 @@ typedef struct FunctionLogEntry_t {
 void logFunction(func_event_t eventType, string name) {
 #ifdef LOGBINARY
     FunctionLogEntry fle;
+    fle.time = getTimestamp();
     memset(fle.name, 0, 100 * sizeof(char));
     strcpy(fle.name, name.c_str());
     fle.tid = PIN_ThreadId();
-    
+    logfiles[LOG_FUNC].write((char *)&fle, sizeof(FunctionLogEntry));
 #else
 	    cout << (char*)funcEventNames[eventType] << " " << PIN_ThreadId() << " " 
 		 << name << endl;	 
@@ -317,6 +339,7 @@ void logFunction(func_event_t eventType, string name) {
 			   //VOID *rtnAddr, VOID *accessType)
 
 typedef struct AccessLogEntry_t {
+    uint64_t time;
     char type;
     uint32_t addr;
     uint32_t size;
@@ -328,13 +351,14 @@ typedef struct AccessLogEntry_t {
 void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VOID *rtnAddr, AllocRecord *alloc, string source, string name, string field) {
 #ifdef LOGBINARY
     AccessLogEntry ale;
+    ale.time = getTimestamp();
     ale.type = accessType[0];
     ale.addr = addr;
     ale.size = size;
     ale.codeAddr = codeAddr;
     ale.rtnAddr = rtnAddr;
     ale.allocId = alloc;
-    cout << ale.type << endl;
+    logfiles[LOG_ACCESS].write((char *)&ale, sizeof(FunctionLogEntry));
 #else
 	    cout << (char*)accessType << " " << PIN_ThreadId() << " 0x" << hex << setw(16) 
 		 << setfill('0') << addr << dec << " " << size << " " 
@@ -355,6 +379,15 @@ void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VO
         cout.flush();
 #endif
 }
+
+typedef struct AllocLogEntry_t {
+    char type;
+    uint32_t addr;
+    uint32_t size;
+    uint32_t codeAddr;
+    void * rtnAddr;
+    void * allocId;
+} AllocLogEntry;
 
 void logAlloc(FuncRecord *fr, string filename, int line, string varname, string vartype) {
 #ifdef LOGBINARY
@@ -1641,6 +1674,11 @@ VOID Fini(INT32 code, VOID *v)
 
 int main(int argc, char *argv[])
 {
+
+#ifdef LOGBINARY
+    logfiles[LOG_FUNC].open("log_func.dat", ios::out | ios::binary);
+    logfiles[LOG_ACCESS].open("log_access.dat", ios::out | ios::binary);
+#endif
     // Initialize pin & symbol manager
     PIN_InitSymbols();
     if( PIN_Init(argc,argv) )
@@ -1649,6 +1687,8 @@ int main(int argc, char *argv[])
     }    
     
     PIN_InitLock(&lock);
+    timestamp = 0;
+    PIN_InitLock(&timelock);
 
     /* If the user wants to trace only the specific function (and whatever is
      * called from them), they would provide a list of functions of interest. 
