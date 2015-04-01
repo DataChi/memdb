@@ -1,3 +1,5 @@
+#include <stdio.h>
+#include <stdlib.h>
 #include <iostream>
 #include <fstream>
 #include <map>
@@ -71,7 +73,7 @@ int main() {
                 fv.value = acle.value;
                 valuemap[acle.allocBase][offset] = fv;
             } else {
-                valuemap[acle.allocBase][offset].unique = false;
+                //valuemap[acle.allocBase][offset].unique = false;
             }
         }
     }
@@ -79,9 +81,56 @@ int main() {
 //map<void *, packedvalue> packedvalues; // first is base
 
     for (auto it = valuemap.begin(); it != valuemap.end(); it++) {
+        void * key = it->first;
+        auto fieldmap = it->second;
 
+        int uniqueCount = 0;
+        for (auto it2 = fieldmap.begin(); it2 != fieldmap.end(); it2++) {
+            if (it2->second.unique) {
+                uniqueCount++;
+            }
+        }
+        packedvalue pv;
+        pv.nelem = uniqueCount;
+        pv.values = (uint64_t *) malloc(pv.nelem * sizeof(uint64_t));
+
+        int i = 0;
+        for (auto it2 = fieldmap.begin(); it2 != fieldmap.end(); it2++) {
+            if (it2->second.unique) {
+                pv.values[i++] = it2->second.value;
+            }
+        }
+        
+        packedvalues[key] = pv;
     }
 
+    logfiles[LOG_ACCESS].clear();
+    logfiles[LOG_ACCESS].seekg(0, logfiles[LOG_ACCESS].beg);
+
+    map<void *, ofstream *> outfiles;
+    int i = 0;
+    for (auto it = allocPointSet.begin(); it != allocPointSet.end(); it++) {
+        char filename[16];
+        snprintf(filename, 15, "out%04d.dat", i++);
+        cout << filename << endl;
+        ofstream *temp = new ofstream();
+        temp->open(filename, ios::out);
+        outfiles[*it] = temp;
+    }
+
+    while (logfiles[LOG_ACCESS]) {
+        logfiles[LOG_ACCESS].read((char*)&acle, sizeof(AccessLogEntry));  
+        if (allocmap.count(acle.allocBase) != 0) {
+            void *outKey = allocmap[acle.allocBase].allocPoint;
+            *(outfiles[outKey]) << acle.time << ", " << acle.allocBase << endl;
+            //*(outfiles[outKey]) << acle.time << ": ";
+            //packedvalue pv = packedvalues[acle.allocBase];
+            //for (i = 0; i < pv.nelem; i++) {
+                //*(outfiles[outKey]) << pv.values[i] << " ";
+            //}
+            //*(outfiles[outKey]) << endl;
+        }
+    }
     
     return 0;
 }
