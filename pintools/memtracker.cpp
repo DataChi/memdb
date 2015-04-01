@@ -335,12 +335,15 @@ void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VO
     AccessLogEntry ale;
     ale.time = getTimestamp();
     ale.type = accessType[0];
-    ale.addr = addr;
+    ale.addr = (void *)addr;
     ale.size = size;
+    if (((char *)accessType)[0] == 'w') {
+        PIN_SafeCopy(&ale.value,(const VOID *)addr, size);
+    }
     ale.codeAddr = codeAddr;
     ale.rtnAddr = rtnAddr;
-    ale.allocId = alloc;
-    logfiles[LOG_ACCESS].write((char *)&ale, sizeof(FunctionLogEntry));
+    ale.allocBase = (void *)(alloc ? alloc->base : 0);
+    logfiles[LOG_ACCESS].write((char *)&ale, sizeof(AccessLogEntry));
 #else
 	    cout << (char*)accessType << " " << PIN_ThreadId() << " 0x" << hex << setw(16) 
 		 << setfill('0') << addr << dec << " " << size << " " 
@@ -364,6 +367,22 @@ void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VO
 
 void logAlloc(FuncRecord *fr, string filename, int line, string varname, string vartype) {
 #ifdef LOGBINARY
+//typedef struct AllocLogEntry_t {
+    //char type;
+    //uint32_t addr;
+    //uint32_t size;
+    //uint32_t codeAddr;
+    //void * rtnAddr;
+    //void * allocId;
+//} AllocLogEntry;
+    UINT32 tid = PIN_ThreadId();
+    AllocLogEntry ale;
+    ale.time = getTimestamp();
+    ale.allocPoint = (void*)(*fr->thrAllocData)[tid]->calledFromAddr;
+    ale.addr = (void *)(*fr->thrAllocData)[tid]->addr;
+    ale.size = (*fr->thrAllocData)[tid]->size;
+    logfiles[LOG_ALLOC].write((char *)&ale, sizeof(AllocLogEntry));
+
 
 #else
     UINT32 tid = PIN_ThreadId();
@@ -1651,6 +1670,7 @@ int main(int argc, char *argv[])
 #ifdef LOGBINARY
     logfiles[LOG_FUNC].open("log_func.dat", ios::out | ios::binary);
     logfiles[LOG_ACCESS].open("log_access.dat", ios::out | ios::binary);
+    logfiles[LOG_ALLOC].open("log_alloc.dat", ios::out | ios::binary);
 #endif
     // Initialize pin & symbol manager
     PIN_InitSymbols();
