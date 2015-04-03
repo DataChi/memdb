@@ -319,7 +319,7 @@ void logFunction(func_event_t eventType, string name) {
     FunctionLogEntry fle;
     fle.time = getTimestamp();
     fle.type = (eventType == FUNC_BEGIN ? 'b' : 'e');
-    memset(fle.name, 0, 100 * sizeof(char));
+    memset(fle.name, 0, FNAMESIZE * sizeof(char));
     strcpy(fle.name, name.c_str());
     fle.tid = PIN_ThreadId();
     logfiles[LOG_FUNC].write((char *)&fle, sizeof(FunctionLogEntry));

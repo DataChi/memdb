@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#define FNAMESIZE 256
+
 typedef struct AccessLogEntry_t {
     uint64_t time;
     char type;
@@ -17,7 +19,7 @@ typedef struct AccessLogEntry_t {
 
 typedef struct FunctionLogEntry_t {
     uint64_t time;
-    char name[100];
+    char name[FNAMESIZE];
     char type;
     uint32_t tid;
 } FunctionLogEntry;
