@@ -30,6 +30,7 @@ typedef struct packedvalue_ {
 map<void *, map<int, fieldvalue>> valuemap; // first is base
 map<void *, packedvalue> packedvalues; // first is base
 set<void *> allocPointSet;
+map<void *, set<int>> rwIndices;
 
 ifstream logfiles[NR_LOGS];
 
@@ -82,57 +83,74 @@ int main() {
 
 //map<void *, packedvalue> packedvalues; // first is base
 
+    // make non-unique idx signatures
     for (auto it = valuemap.begin(); it != valuemap.end(); it++) {
         void * key = it->first;
+        void *outKey = allocmap[key].allocPoint;
         auto fieldmap = it->second;
-
-        int uniqueCount = 0;
         for (auto it2 = fieldmap.begin(); it2 != fieldmap.end(); it2++) {
-            if (it2->second.unique) {
-                uniqueCount++;
+            if (!(it2->second.unique)) {
+               rwIndices[outKey].insert(it2->first);
             }
         }
-        packedvalue pv;
-        pv.nelem = uniqueCount;
-        pv.values = (uint64_t *) malloc(pv.nelem * sizeof(uint64_t));
-
-        int i = 0;
-        for (auto it2 = fieldmap.begin(); it2 != fieldmap.end(); it2++) {
-            if (it2->second.unique) {
-                pv.values[i++] = it2->second.value;
-            }
-        }
-        
-        packedvalues[key] = pv;
     }
+
+    for (auto it = rwIndices.begin(); it != rwIndices.end(); it++) {
+        cout << it->first << ":";
+        for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+            cout << " " << *it2;
+        }
+        cout << endl;
+    }
+
 
     logfiles[LOG_ACCESS].clear();
     logfiles[LOG_ACCESS].seekg(0, logfiles[LOG_ACCESS].beg);
 
-    map<void *, ofstream *> outfiles;
+#define OF_ACCESSES 0 
+#define OF_VALUES 1
+
+    map<void *, ofstream *> outfiles[2];
     int i = 0;
     for (auto it = allocPointSet.begin(); it != allocPointSet.end(); it++) {
-        char filename[16];
-        snprintf(filename, 15, "out%04d.dat", i++);
+        char filename[20];
+        snprintf(filename, 19, "out%04d_acc.dat", i);
         cout << *it << " " << filename << endl;
         ofstream *temp = new ofstream();
         temp->open(filename, ios::out);
-        outfiles[*it] = temp;
+        *temp << *it << endl;
+        outfiles[OF_ACCESSES][*it] = temp;
+        snprintf(filename, 19, "out%04d_val.dat", i++);
+        temp = new ofstream();
+        temp->open(filename, ios::out);
+        *temp << *it << endl;
+        outfiles[OF_VALUES][*it] = temp;
+    }
+
+    for (auto it = valuemap.begin(); it != valuemap.end(); it++) {
+        void * key = it->first;
+        auto fieldmap = it->second;
+        void *outKey = allocmap[it->first].allocPoint;
+
+        int uniqueCount = 0;
+        *(outfiles[OF_VALUES][outKey]) << key << ":";
+        for (auto it2 = fieldmap.begin(); it2 != fieldmap.end(); it2++) {
+            if (rwIndices[key].count(it2->first) == 0) {
+                *(outfiles[OF_VALUES][outKey]) << " (" << it2->first << ", " << it2->second.value << ")";
+            }
+        }
+        *(outfiles[OF_VALUES][outKey]) << endl;
+
     }
 
     while (logfiles[LOG_ACCESS]) {
         logfiles[LOG_ACCESS].read((char*)&acle, sizeof(AccessLogEntry));  
         if (allocmap.count(acle.allocBase) != 0) {
             void *outKey = allocmap[acle.allocBase].allocPoint;
-            *(outfiles[outKey]) << acle.time << ", " << acle.allocBase << ": ";
-            packedvalue pv = packedvalues[acle.allocBase];
-            for (i = 0; i < pv.nelem; i++) {
-                *(outfiles[outKey]) << pv.values[i] << " ";
-            }
-            *(outfiles[outKey]) << endl;
+            *(outfiles[OF_ACCESSES][outKey]) << acle.time << ", " << acle.allocBase << endl;
         }
     }
-    for (auto it = outfiles.begin(); it != outfiles.end(); it++) {
+    for (auto it = outfiles[OF_ACCESSES].begin(); it != outfiles[OF_ACCESSES].end(); it++) {
         it->second->flush();
         it->second->close();
     }

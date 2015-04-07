@@ -340,7 +340,6 @@ void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VO
     if (((char *)accessType)[0] == 'w') {
         ale.value = 0;
         PIN_SafeCopy(&ale.value,(const VOID *)addr, size);
-        cout << "value: " << ale.value << endl;
     }
     ale.codeAddr = codeAddr;
     ale.rtnAddr = rtnAddr;
