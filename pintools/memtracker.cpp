@@ -338,7 +338,9 @@ void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VO
     ale.addr = (void *)addr;
     ale.size = size;
     if (((char *)accessType)[0] == 'w') {
+        ale.value = 0;
         PIN_SafeCopy(&ale.value,(const VOID *)addr, size);
+        cout << "value: " << ale.value << endl;
     }
     ale.codeAddr = codeAddr;
     ale.rtnAddr = rtnAddr;
@@ -356,7 +358,7 @@ void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VO
 	    cout << " " << (alloc ? alloc->varType : "-");
 
         if (((char *)accessType)[0] == 'w') {
-            float dst;
+            uint64_t dst;
             PIN_SafeCopy(&dst,(const VOID *)addr, size);
             cout << " " << dst;
         }
@@ -1655,6 +1657,12 @@ VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v)
 
 VOID Fini(INT32 code, VOID *v)
 {
+#ifdef LOGBINARY
+    logfiles[LOG_FUNC].flush();
+    logfiles[LOG_ACCESS].flush();
+    logfiles[LOG_ALLOC].flush();
+#endif
+
     cout << "PR DONE" << endl;
 }
 
