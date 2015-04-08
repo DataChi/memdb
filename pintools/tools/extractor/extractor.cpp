@@ -36,12 +36,16 @@ ifstream logfiles[NR_LOGS];
 
 string logpath = "../../";
 
-int main() {
-    string path = logpath + string("log_func.dat");
+int main(int argc, char **argv) {
+    if (argc == 2) {
+        logpath = argv[1];
+        cout << "Path set to " << logpath << endl;
+    }
+    string path = logpath + string("/log_func.dat");
     logfiles[LOG_FUNC].open(path.c_str(), ios::in | ios::binary);
-    path = logpath + string("log_access.dat");
+    path = logpath + string("/log_access.dat");
     logfiles[LOG_ACCESS].open(path.c_str(), ios::in | ios::binary);
-    path = logpath + string("log_alloc.dat");
+    path = logpath + string("/log_alloc.dat");
     logfiles[LOG_ALLOC].open(path.c_str(), ios::in | ios::binary);
 
     AccessLogEntry acle;
