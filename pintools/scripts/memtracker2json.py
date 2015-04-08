@@ -283,8 +283,8 @@ def main():
             print 'File ' + args.infile + ' does not exist.';
             sys.exit(1);
 
-            fdTrace = open(args.infile, "r");
-            parse(fdTrace, args.keepdots, sys.stdout);
+        fdTrace = open(args.infile, "r");
+        parse(fdTrace, args.keepdots, sys.stdout);
 
 if __name__ == '__main__':
     main()
