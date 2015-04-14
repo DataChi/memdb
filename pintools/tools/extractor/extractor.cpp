@@ -124,10 +124,10 @@ int main(int argc, char **argv) {
         temp->open(filename, ios::out);
         *temp << *it << endl;
         outfiles[OF_ACCESSES][*it] = temp;
-        snprintf(filename, 19, "out%04d_val.dat", i++);
+        snprintf(filename, 19, "out%04d_val.json", i++);
         temp = new ofstream();
         temp->open(filename, ios::out);
-        *temp << *it << endl;
+        *temp << "{\"alloc-base\": \"" << *it << "\", " << endl << "\"values\" : { "<< endl;
         outfiles[OF_VALUES][*it] = temp;
     }
 
@@ -137,14 +137,23 @@ int main(int argc, char **argv) {
         void *outKey = allocmap[it->first].allocPoint;
 
         int uniqueCount = 0;
-        *(outfiles[OF_VALUES][outKey]) << key << ":";
+
+        *(outfiles[OF_VALUES][outKey]) << "\"" << key << "\": ";
+        *(outfiles[OF_VALUES][outKey])  << "{ ";
         for (auto it2 = fieldmap.begin(); it2 != fieldmap.end(); it2++) {
             if (rwIndices[key].count(it2->first) == 0) {
-                *(outfiles[OF_VALUES][outKey]) << " (" << it2->first << ", " << it2->second.value << ")";
+                *(outfiles[OF_VALUES][outKey]) << " \"" << it2->first << "\":\"" << it2->second.value << "\"" << (next(it2) != fieldmap.end() ? ", " : "");
             }
         }
+        *(outfiles[OF_VALUES][outKey]) << "} " << (next(it) != valuemap.end() ? ", " : "") << endl;
         *(outfiles[OF_VALUES][outKey]) << endl;
 
+    }
+
+    for (auto it = outfiles[OF_VALUES].begin(); it != outfiles[OF_VALUES].end(); it++) {
+        *(it->second) << "}" << endl << "}" << endl;
+        it->second->flush();
+        it->second->close();
     }
 
     while (logfiles[LOG_ACCESS]) {
