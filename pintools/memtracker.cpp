@@ -288,6 +288,7 @@ enum {
     LOG_FUNC,
     LOG_ALLOC,
     LOG_ACCESS,
+    LOG_ALLOCTYPE,
     NR_LOGS
 };
 
@@ -366,6 +367,8 @@ void logAccess(char *accessType, ADDRINT addr, UINT32 size, ADDRINT codeAddr, VO
 #endif
 }
 
+map<void *, string> allocTypeMap;
+
 void logAlloc(FuncRecord *fr, string filename, int line, string varname, string vartype) {
 #ifdef LOGBINARY
 //typedef struct AllocLogEntry_t {
@@ -380,6 +383,12 @@ void logAlloc(FuncRecord *fr, string filename, int line, string varname, string 
     AllocLogEntry ale;
     ale.time = getTimestamp();
     ale.allocPoint = (void*)(*fr->thrAllocData)[tid]->calledFromAddr;
+
+    if (allocTypeMap.count(ale.allocPoint) == 0) {
+        allocTypeMap[ale.allocPoint] = vartype;
+        logfiles[LOG_ALLOCTYPE] << ale.allocPoint << " " << vartype << endl;
+    }
+
     ale.addr = (void *)(*fr->thrAllocData)[tid]->addr;
     ale.size = (*fr->thrAllocData)[tid]->size;
     logfiles[LOG_ALLOC].write((char *)&ale, sizeof(AllocLogEntry));
@@ -1660,6 +1669,7 @@ VOID Fini(INT32 code, VOID *v)
     logfiles[LOG_FUNC].flush();
     logfiles[LOG_ACCESS].flush();
     logfiles[LOG_ALLOC].flush();
+    logfiles[LOG_ALLOCTYPE].flush();
 #endif
 
     cout << "PR DONE" << endl;
@@ -1678,6 +1688,7 @@ int main(int argc, char *argv[])
     logfiles[LOG_FUNC].open("log_func.dat", ios::out | ios::binary);
     logfiles[LOG_ACCESS].open("log_access.dat", ios::out | ios::binary);
     logfiles[LOG_ALLOC].open("log_alloc.dat", ios::out | ios::binary);
+    logfiles[LOG_ALLOCTYPE].open("log_alloctype.txt", ios::out);
 #endif
     // Initialize pin & symbol manager
     PIN_InitSymbols();
