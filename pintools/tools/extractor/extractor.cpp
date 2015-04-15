@@ -131,6 +131,7 @@ int main(int argc, char **argv) {
         outfiles[OF_VALUES][*it] = temp;
     }
 
+    set<void *> started;
     for (auto it = valuemap.begin(); it != valuemap.end(); it++) {
         void * key = it->first;
         auto fieldmap = it->second;
@@ -138,16 +139,21 @@ int main(int argc, char **argv) {
 
         int uniqueCount = 0;
 
+        if (started.count(outKey) != 0) {
+            *(outfiles[OF_VALUES][outKey]) << ", " << endl;
+        } else {
+            started.insert(outKey);
+        }
+
         *(outfiles[OF_VALUES][outKey]) << "\"" << key << "\": ";
         *(outfiles[OF_VALUES][outKey])  << "{ ";
+
         for (auto it2 = fieldmap.begin(); it2 != fieldmap.end(); it2++) {
             if (rwIndices[key].count(it2->first) == 0) {
-                *(outfiles[OF_VALUES][outKey]) << " \"" << it2->first << "\":\"" << it2->second.value << "\"" << (next(it2) != fieldmap.end() ? ", " : "");
+                *(outfiles[OF_VALUES][outKey]) << " \"" << it2->first << "\":\"" << it2->second.value << "\"" << ((next(it2) != fieldmap.end()) ? ", " : "");
             }
         }
-        *(outfiles[OF_VALUES][outKey]) << "} " << (next(it) != valuemap.end() ? ", " : "") << endl;
-        *(outfiles[OF_VALUES][outKey]) << endl;
-
+        *(outfiles[OF_VALUES][outKey]) << "}" << endl;
     }
 
     for (auto it = outfiles[OF_VALUES].begin(); it != outfiles[OF_VALUES].end(); it++) {
