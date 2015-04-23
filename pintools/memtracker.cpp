@@ -391,6 +391,7 @@ void logAlloc(FuncRecord *fr, string filename, int line, string varname, string 
 
     ale.addr = (void *)(*fr->thrAllocData)[tid]->addr;
     ale.size = (*fr->thrAllocData)[tid]->size;
+
     logfiles[LOG_ALLOC].write((char *)&ale, sizeof(AllocLogEntry));
 
 
@@ -1130,6 +1131,8 @@ VOID callAfterAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr)
 	}
 
 	/* Let's remember this allocation record */
+#define CALLOC_SPLITTING
+#ifndef CALLOC_SPLITTING
 	{
 	  ADDRINT base = (*fr->thrAllocData)[tid]->addr;
 	  size_t size = (*fr->thrAllocData)[tid]->size * 
@@ -1157,9 +1160,42 @@ VOID callAfterAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr)
 
 	  allocmap.insert(make_pair(*mr, *ar));
 	
+      logAlloc(fr, filename, line, varname, vartype);
 	}
+#else
+	{
+	  ADDRINT base = (*fr->thrAllocData)[tid]->addr;
+	  size_t item_size = (*fr->thrAllocData)[tid]->size;
+	  size_t item_number = 	(*fr->thrAllocData)[tid]->number;
+
+      for (unsigned int i = 0; i < item_number; i++) {
+          MemoryRange *mr = new MemoryRange(base, item_size);
+          AllocRecord *ar = new AllocRecord(filename, line, varname, vartype, fr->vi,
+                            base, item_size, 1);
+
+          map<MemoryRange, AllocRecord>::iterator it =
+            allocmap.find(*mr);
+          
+          if(it != allocmap.end())
+          {
+              /* If we found an allocation in the same range as the
+               * new one, chances are someone has freed that allocation.
+               * We don't support tracking of "free" calls yet, so let's
+               * output an "implicit" free record.
+               */
+              cout << "implicit-free: " 
+               << " 0x" << hex << setfill('0') << setw(16) << it->first.base << endl;
+              allocmap.erase(it);
+          }
+
+          allocmap.insert(make_pair(*mr, *ar));
+        
+          logAlloc(fr, filename, line, varname, vartype);
+          base += item_size;
+      }
+	}
+#endif
 	
-    logAlloc(fr, filename, line, varname, vartype);
     }
     PIN_ReleaseLock(&lock);
 
