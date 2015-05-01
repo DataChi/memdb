@@ -265,6 +265,7 @@ vector<FuncProto *> funcProto;
 
 typedef struct thread_alloc_data
 {
+    bool dontTrack;
     ADDRINT calledFromAddr;
     ADDRINT size;
     int number;
@@ -286,6 +287,12 @@ typedef struct func_record
 
 vector<FuncRecord*> funcRecords;
 unsigned int largestUnusedThreadID = 0;
+
+/* A vector of per-thread flags specifying
+ * if the thread is currently in an alloc function. 
+ * This is used to track recursive allocations. 
+ */
+vector<bool> inAlloc;
 
 /* 
  * A vector with per-thread flags specifying whether the thread is
@@ -939,13 +946,17 @@ VOID callBeforeAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr, ADDRINT number,
 
     assert(fr->thrAllocData->size() > tid);
 
-    if((*fr->thrAllocData)[tid]->calledFromAddr != 0)
+    /* We don't track recursive alloc functions. We
+     * only care to track the top-level allocation function
+     * because it lets us figure out the name of the allocated variable.
+     */
+    if(inAlloc[tid])
     {
-	PIN_GetLock(&lock, PIN_ThreadId() + 1);
-	cout << "Warning: recursive allocation: " << fr->name <<
-	    ", retaddr: " << hex << addr << dec << ", size: " << size << endl;
-	PIN_ReleaseLock(&lock);
+	(*fr->thrAllocData)[tid]->dontTrack = true;
+	return;
     }
+
+    inAlloc[tid] = true;
 
     (*fr->thrAllocData)[tid]->calledFromAddr = addr;
     (*fr->thrAllocData)[tid]->size = size;
@@ -960,7 +971,18 @@ VOID callAfterAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr)
     if(!go)
 	return;
 
+
     assert(fr->thrAllocData->size() > tid);
+    
+    /* Not tracking recursive calls to alloc functions, i.e., 
+     * a call to any alloc function within any other alloc func. 
+     */
+    if(	(*fr->thrAllocData)[tid]->dontTrack)
+    {
+	(*fr->thrAllocData)[tid]->dontTrack = false;
+	return;
+    }
+
     assert((*fr->thrAllocData)[tid]->calledFromAddr != 0);
 
     if((*fr->thrAllocData)[tid]->retptr == 0)
@@ -1052,7 +1074,7 @@ VOID callAfterAlloc(FuncRecord *fr, THREADID tid, ADDRINT addr)
      * in the middle of the function call. 
      */
     (*fr->thrAllocData)[tid]->calledFromAddr = 0;
-
+    inAlloc[tid] = false;
 }
 
 VOID callBeforeAfterFunction(VOID *rtnAddr, func_event_t eventType)
@@ -1525,6 +1547,9 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
 	inTracked.push_back(NO);
     else
 	inTracked.push_back(YES);
+
+    /* A thread is not in an alloc func when it starts */
+    inAlloc.push_back(false);
 
     for(FuncRecord *fr: funcRecords)
     {
