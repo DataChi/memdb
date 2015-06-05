@@ -147,13 +147,15 @@ public:
     size_t timeStamp;  /* Virtual time of access */
     unsigned short timesReusedBeforeEvicted;
 
+    /* CacheLine constructor does not take any arguments and instead we set 
+     * the parameters from the globals. That enables us to 
+     * allocate an entire array of cache lines. That allocation
+     * relies on zero-argument constructor and does not work
+     * with constructors that take arguments. 
+     */
     CacheLine() /* Size is given in bytes */
 	{
-	    lineSize = CACHE_LINE_SIZE; /* this is ugly, but C++ doesn't
-					 * allow to allocate an array and 
-					 * initialize all members with the
-					 * same constructor at the same time. 
-					 */
+	    lineSize = CACHE_LINE_SIZE;
 	    address = 0;
 	    tag = 0;
 	    initAccessSize = 0;
@@ -273,6 +275,12 @@ public:
     size_t curTime; /* a virtual time ticks every time someone
 		     * accesses this cache set. */
 public:
+    /* CacheSet constructor does not take any arguments and instead we set 
+     * the parameters from the globals. That enables us to 
+     * allocate an entire array of cache sets. That allocation
+     * relies on zero-argument constructor and does not work
+     * with constructors that take arguments. 
+     */
     CacheSet()
 	{
 	    assoc = ASSOC;
@@ -323,9 +331,10 @@ public:
     /* See if any of the existing cache lines hold
      * that address. If so, access the cache line. 
      * Otherwise, find someone to evict and populate
-     * the cache line with the new data
+     * the cache line with the new data.
+     * Return true on a hit, false on a miss. 
      */
-    void access(size_t address, unsigned short accessSize, 
+    bool access(size_t address, unsigned short accessSize, 
 		string accessSite, string varInfo)
 	{
 	    curTime++;
@@ -335,7 +344,7 @@ public:
 		if(lines[i].valid(address))
 		{
 		    lines[i].access(address, accessSize, curTime);
-		    return;
+		    return true;
 		}
 	    }
 	    
@@ -344,6 +353,7 @@ public:
 	     */
 	    CacheLine *line = findCleanOrVictim(curTime);
 	    line->setAndAccess(address, accessSize, accessSite, varInfo, curTime);
+	    return false;
 	}
 
     void printParams()
@@ -360,14 +370,15 @@ public:
     int assoc;
     int lineSize;
     CacheSet *sets;
+    int numMisses, numHits;
 
 
-    Cache(int numSets, int assoc, int lineSize)
+    Cache(int ns, int as, int ls)
+	: numSets(ns), assoc(as), lineSize(ls)
 	{
-	    this->numSets = numSets;
-	    this->assoc = assoc;
-	    this->lineSize = lineSize;
 	    sets = new CacheSet[numSets];
+	    numMisses = 0;
+	    numHits = 0;
 
 	    /* This is by how many bits we have to shift the
 	     * address to compute the tag. */
@@ -424,6 +435,12 @@ public:
 	    cout << "Associativity  = " << assoc << endl;
 	}
 
+    void printStats()
+	{
+	    cout << "Number of hits: " << numHits << endl;
+	    cout << "Number of misses: " << numMisses << endl;
+	}
+    
 private:
     /* Here we assume that accesses would not be spanning cache
      * lines. The calling function should have taken care of this.
@@ -438,8 +455,11 @@ private:
 #if VERBOSE
 	    cout << hex << address << dec << " maps into set #" << setNum << endl;
 #endif
-	    sets[setNum].access(address, accessSize, accessSite, varInfo);
-	    
+	    bool hit = sets[setNum].access(address, accessSize, accessSite, varInfo);
+	    if(hit)
+		numHits++;
+	    else
+		numMisses++;
 	}
 
 };
@@ -529,46 +549,6 @@ void parseAndSimulate(string line, Cache *c)
  * display them in a user-friendly way. We will group the records
  * by source code line(access site) and display them in the order of decreasing
  * waste occurrences.
- *
-void summarizeZeroReuseMap()
-{
-
-    /* Iterate the map. Once we encounter a new source line,
-     * count the number of its associated waste records, 
-     * put that in the summarized map, where the count is the key, 
-     * and the value is the list (vector) of associated waste records.
-     *
-    for(auto it = zeroReuseMap.begin(); it != zeroReuseMap.end(); it++) 
-    {
-	string curAccessSite = "";
-	vector<ZeroReuseRecord> curVector;
-
-	curAccessSite = it->first;
-	cout << curAccessSite << endl;
-	do 
-	{
-	    curVector.push_back(it->second);
-	    ++it;
-	} while (it != zeroReuseMap.end() && curAccessSite.compare(it->first)==0);
-	/*
-	cout << "Out of the while loop " << endl;
-
-	  cout << it->first << endl;
-	else
-	  cout << "NULL " << endl;
-	*
-	
-	tuple<string, vector<ZeroReuseRecord>> gRecs = make_tuple(curAccessSite, curVector); 
-	groupedZeroReuseMap.insert(make_pair(curVector.size(), gRecs));	
-	
-	if(it == zeroReuseMap.end())
-	  break;
-    }
-    }*/
-
-/* 
- * This is essentially a duplication of the code above. Only the types
- * are different. Got to rewrite it to be one function. 
  */
 template <class T>
 void summarizeWasteMap(unordered_multimap<string, T> &ungroupedMap,
