@@ -715,7 +715,6 @@ int main(int argc, char *argv[])
 
     }
 
-    //summarizeZeroReuseMap();
     summarizeWasteMap<ZeroReuseRecord>(zeroReuseMap, groupedZeroReuseMap);
     cout << "*************************************************" << endl;
     cout << "         ZERO REUSE MAP SUMMARIZED               " << endl;
