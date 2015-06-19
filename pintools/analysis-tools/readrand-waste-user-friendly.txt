@@ -1,0 +1,44 @@
+PLACES WHERE WE BRING IN A CACHE LINE AND NEVER REUSE IT BEFORE IT IS EVICTED:
+
+35204 waste occurrences
+__wt_row_search /cs/systems/home/fedorova/Work/WiredTiger/wt-dev/build_posix/../src/include/btree_cmp.i:167 
+        /cs/systems/home/fedorova/Work/WiredTiger/wt-dev/build_posix/../src/support/scratch.c:48 buf->mem-><Unknown> <Unknown> 
+
+
+20279 waste occurrences
+__wt_row_search /cs/systems/home/fedorova/Work/WiredTiger/wt-dev/build_posix/../src/include/btree.i:496 
+        /cs/systems/home/fedorova/Work/WiredTiger/wt-dev/build_posix/../src/btree/bt_page.c:279 pindex->index[i]-><Unknown> <Unknown> 
+
+
+18454 waste occurrences
+_IO_str_seekoff <unknown> 
+        
+
+12135 waste occurrences
+__wt_row_search /cs/systems/home/fedorova/Work/WiredTiger/wt-dev/build_posix/../src/include/btree.i:784 
+        /cs/systems/home/fedorova/Work/WiredTiger/wt-dev/build_posix/../src/btree/bt_page.c:249 page-><Unknown> __wt_page* 
+
+
+PLACES WHERE WE BRING IN THE CACHE LINE BUT USE ONLY A SMALL PORTION OF IT BEFORE THIS CACHE LINE IS EVICTED:
+
+42907 waste occurrences
+__wt_row_search /cs/systems/home/fedorova/Work/WiredTiger/wt-dev/build_posix/../src/include/btree_cmp.i:167 
+        /cs/systems/home/fedorova/Work/WiredTiger/wt-dev/build_posix/../src/support/scratch.c:48 buf->mem-><Unknown> <Unknown> 
+        2/64
+
+30301 waste occurrences
+_IO_str_seekoff <unknown> 
+        0x7f447c000884
+        24/64
+
+30217 waste occurrences
+__wt_row_search /cs/systems/home/fedorova/Work/WiredTiger/wt-dev/build_posix/../src/include/btree.i:496 
+        /cs/systems/home/fedorova/Work/WiredTiger/wt-dev/build_posix/../src/btree/bt_page.c:279 pindex->index[i]-><Unknown> <Unknown> 
+        8/64
+--
+11289 waste occurrences
+__wt_row_search /cs/systems/home/fedorova/Work/WiredTiger/wt-dev/build_posix/../src/include/btree.i:784 
+        /cs/systems/home/fedorova/Work/WiredTiger/wt-dev/build_posix/../src/btree/bt_page.c:249 page-><Unknown> __wt_page* 
+        8/64
+
+
